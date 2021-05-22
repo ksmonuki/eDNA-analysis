@@ -1,0 +1,14 @@
+---
+title: "README"
+author: "Keira Monuki"
+date: "5/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## README
+
+This is the README File for the eDNA analysis code. 
