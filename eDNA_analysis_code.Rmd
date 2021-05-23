@@ -1,0 +1,5108 @@
+---
+title: "eDNA Variability Across Depth, Horizontal Space, and Time"
+author: "Keira Monuki and Zack Gold"
+date: "5/11/21"
+output: html_document
+indent: true
+header-includes:
+  - \setlength{\parindent}{4em}
+  - \setlength{\parskip}{0em}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Analyses
+Decontamination code is on another script from Zack Gold. This RMarkdown has the downstream analyses of the decontaminated data. 
+
+#####Load Libraries  
+```{r load libraries, results="hide", warning=FALSE, include=FALSE, message = FALSE}
+library(ape)
+library(ampvis2)
+library(biomformat)
+library(colorspace)
+library(cluster)
+library(dendextend)
+library(dplyr)
+library(gradientForest) #gradientForest version 0.1-17
+library(extendedForest) #extendedForest version 1.6.1
+library(grid)
+library(gridExtra)
+library(gridBase)
+library(ggfortify)
+library(devtools)
+library(ggbiplot)
+library(ggrepel)
+library(ggplot2)
+library(knitr)
+library(devtools)
+library(multcompView)
+library(optparse)
+library(phyloseq)
+library(proxy)
+library(plotly)
+library(readr)
+library(RColorBrewer)
+library(reshape2)
+library(ranacapa) 
+library(scales)
+library(tibble)
+library(tidyverse)
+library(treemapify) 
+library(wesanderson) 
+library(vegan) #vegan version 2.5-6
+
+```
+
+
+#####Load Data Sets  
+```{r Load Data Sets}
+
+#Set Local folder to save output files
+Local_folder <- "/Users/keiramonuki/Documents/Barber_Lab"
+
+#Set Working Directory to Local Folder path
+setwd("/Users/keiramonuki/Documents/Barber_Lab")
+
+#Paths to Files
+
+##Metadata Table
+input_meta_path <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_8.7.20.txt"
+
+
+#Load in Metadata Table
+metadata <- read.table(input_meta_path, header = 1, sep = "\t", stringsAsFactors = F)
+
+#Load eDNA index data (post occupancy)
+
+ASV.table <- readRDS(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/post_occupancy_results_merged_runs_separate_eDNA_index.RDS")
+
+
+ASV.summary <- readRDS(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/ASV.summary_post_occ.RDS")
+
+```
+
+
+```{r Review Metadata File}
+
+#Review Metadata File
+head(metadata)
+
+```
+
+```{r Remove Control Samples}
+
+metadata %>% 
+  filter(Sample_control == "SAMPLE") -> metadata
+  
+
+```
+
+```{r Create Phyloseq Object}
+
+#Convert the data into a phyloseq object
+physeq_obj <- convert_anacapa_to_phyloseq(ASV.table, metadata)
+
+#Remove unassigned taxa and known contaminants (e.g. land mammals)
+badTaxa = c("Unassigned", "Chordata;Actinopteri;;;;","Chordata;Mammalia;Primates;Hominidae;Homo;Homo sapiens", "Chordata;Mammalia;;Bovidae;Bos;Bos taurus", "Chordata;Actinopteri;Cypriniformes;Cyprinidae;Ctenopharyngodon;Ctenopharyngodon idella", "Chordata;Aves;Galliformes;Phasianidae;Meleagris;Meleagris gallopavo", "Chordata;Mammalia;Primates;Hominidae;Pan;Pan paniscus", "Chordata;Mammalia;NA;Bovidae;Bison;Bison bonasus", "Chordata;Mammalia;NA;Suidae;Sus;Sus salvanius", "Chordata;Mammalia;Primates;Hominidae;Gorilla;Gorilla gorilla", "Chordata;Mammalia;Carnivora;Canidae;Canis;Canis lupus", "Chordata;Mammalia;Artiodactyla;Bovidae;Bison;Bison bison", "Chordata;Mammalia;Artiodactyla;Suidae;Sus;Sus scrofa", "Chordata;Aves;Galliformes;Phasianidae;Gallus;Gallus gallus", "Chordata;Mammalia;Primates;Cercopithecidae;Macaca;Macaca fascicularis")  
+goodTaxa <- setdiff(taxa_names(physeq_obj), badTaxa)
+physeq_obj <- prune_taxa(goodTaxa, physeq_obj)
+
+physeq_obj
+
+```
+There are a total of 55 samples comprised of 84 taxa with 6 taxonomic ranks.
+<br />
+We created a summary table for the total number of phyla, classes, orders, families, genera and species after site occupancy modeling.
+<br />
+
+```{r Taxonomic Summary Table}
+
+#Separate and count the taxonomic levels
+Phylum <- length(get_taxa_unique(physeq_obj, "Phylum"))
+Phylum <- as.data.frame(Phylum)
+Class <- length(get_taxa_unique(physeq_obj, "Class"))
+Class <- as.data.frame(Class)
+Order <- length(get_taxa_unique(physeq_obj, "Order"))-2
+Order <- as.data.frame(Order)
+Family <- length(get_taxa_unique(physeq_obj, "Family"))-1
+Family <- as.data.frame(Family)
+Genus <- length(get_taxa_unique(physeq_obj, "Genus"))-1
+Genus <- as.data.frame(Genus)
+Species <- length(get_taxa_unique(physeq_obj, "Species"))-1
+Species <- as.data.frame(Species)
+
+taxonomy_summary_table <- bind_cols(Phylum,Class,Order,Family,Genus,Species)
+
+rownames(taxonomy_summary_table) <- "Unique"
+
+taxonomy_summary_table
+
+```
+
+Overall we have 73 species from 71 genera, 48 families, 26 orders and 4 classes. <br />
+
+Next we will generate a list of observed species. 
+```{r Observed Species List}
+
+#List of All Species Observed
+species_list <- as.data.frame (get_taxa_unique(physeq_obj, "Species"))
+names(species_list) <- "Species"
+kable(species_list, caption = "Species Detected using eDNA")
+
+```
+
+Of the 73 species, three are non-native: Two of the non-native species can be attributed to contamination from other project utilizing the same lab space (*Stegastes nigricans* and *Epinephelus merra*). We will manually remove those ASVs from the dataset. The third species is *Campylorhynchus zonatus*, which is likely *C. brunneicapillus*, a sister taxa native to California. I will leave the *C. zonatus* ASVs in the dataset. 
+
+```{r Remove Non-Native Species}
+
+#Remove known non-native taxa
+badTaxa.nonnative = c("Chordata;Actinopteri;;Pomacentridae;Stegastes;Stegastes nigricans", "Chordata;Actinopteri;Perciformes;Serranidae;Epinephelus;Epinephelus merra") 
+#
+goodTaxa.nonnative <- setdiff(taxa_names(physeq_obj), badTaxa.nonnative)
+physeq_obj <- prune_taxa(goodTaxa.nonnative, physeq_obj)
+
+```
+
+We now have 82 taxa across 55 samples. After creating the phyloseq object, we will begin the analyses. First, we will create a color palette for data visualization.
+
+```{r, Color Pallettes , include=FALSE}
+
+# Color Generation For Plots Using the Wes Anderson color package
+col3.gr <- wes_palette(name = "Darjeeling1", n=5, type="discrete")
+col2.gr <- wes_palette(name = "Darjeeling2", n=5, type="discrete")
+col1.gr <- wes_palette(name = "GrandBudapest1", n=4, type="discrete")
+col4.gr <- wes_palette(name = "Royal1", n=4, type="discrete")
+col5.gr <- wes_palette(name = "GrandBudapest2", n=4, type="discrete")
+col6.gr <- wes_palette(name = "Chevalier1", n=4, type="discrete")
+col7.gr <- wes_palette(name = "Moonrise3", n=4, type="discrete")
+col8.gr <- wes_palette(name = "IsleofDogs1", n=4, type="discrete")
+col9.gr <- wes_palette(name = "IsleofDogs2", n=4, type="discrete")
+
+col_mpa <- c(col3.gr[3],col3.gr[1], col3.gr[2], col2.gr[2])
+
+#Rainbow Palette used for Depth Station visualization
+col.great <- c(col3.gr[1], col3.gr[3], col7.gr[2], col3.gr[2], col2.gr[2], col8.gr[1])
+
+```
+
+Analyses are divided into 1) all taxa and 2) core taxa analyses. Within each, analyses are divided into betadiversity analyses using eDNA Index scores and alphadiversity analyses using eDNA read counts.
+
+Betadiversity Statistics
+
+We will analyze the depth gradient using eDNA Index scores from only the offshore stations (excluding shore scores). The RDS file of the ASVs we used to create the phyloseq object contains the eDNA Index scores, a metric of eDNA abundance. We will compare communities using Bray-Curtis dissimilarity.
+
+```{r Format for Vegan Functions}
+
+#Generate vegan formatted data table
+sampledf <- data.frame(sample_data(physeq_obj))
+carnivore_rel_abun<- vegan_otu(physeq_obj)
+
+#Create the Bray-Curtis dissimilarity matrix
+d_carn <- vegdist(carnivore_rel_abun, method="bray") 
+
+```
+
+Now we will remove the shore station values from the data frame. 
+
+```{r Remove Shore station values}
+#Remove shore values from metadata data frame 
+sampledf_noshore <- sampledf %>% 
+  filter(Depth_m >= 0)
+
+#Remove shore values from otu relative abundance data
+edna_index_values <- as.data.frame(carnivore_rel_abun)
+edna_index_values <- rownames_to_column(edna_index_values, "Sample_name")
+  
+edna_index_values <- sampledf %>% 
+  left_join(edna_index_values)
+
+edna_index_values <- edna_index_values %>% 
+  filter(Depth_m >= 0) %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+  
+rownames(edna_index_values) <- edna_index_values[,1] 
+
+edna_index_values <- edna_index_values %>% 
+  select(-Sample_name)
+
+```
+
+Run the PERMANOVA
+
+```{r Run PERMANOVA}
+adonis(edna_index_values ~ sampledf_noshore$Depth_m + sampledf_noshore$Collected_Date + sampledf_noshore$Replicate, distance = "bray", permutations = 999)
+
+```
+
+Sample depth (p=0.001) and collected date (p=0.001) were both statistically significant. We will then run a pairwise PERMANOVA to examine which stations differed significantly in community composition. 
+<br />
+``` {r Pairwise Permanova}
+
+#Pairwise Permanova
+pairwise.adonis <- function(x,factors, sim.function = 'vegdist', sim.method = 'bray', p.adjust.m ='bonferroni')
+
+
+{
+  library(vegan)
+  
+  co = combn(unique(as.character(factors)),2)
+  pairs = c()
+  F.Model =c()
+  R2 = c()
+  p.value = c()
+  
+  for(elem in 1:ncol(co)){
+    if(sim.function == 'daisy'){
+      library(cluster); x1 = daisy(x[factors %in% c(co[1,elem],co[2,elem]),],metric=sim.method)
+    } else{x1 = vegdist(x[factors %in% c(co[1,elem],co[2,elem]),],method=sim.method)}
+    
+    ad = adonis(x[factors %in% c(co[1,elem],co[2,elem]),] ~ factors[factors %in% c(co[1,elem],co[2,elem])], method = "bray"); #edited by Zack Gold 06042019
+    pairs = c(pairs,paste(co[1,elem],'vs',co[2,elem]));
+    F.Model =c(F.Model,ad$aov.tab[1,4]);
+    R2 = c(R2,ad$aov.tab[1,5]);
+    p.value = c(p.value,ad$aov.tab[1,6])
+  }
+  p.adjusted = p.adjust(p.value,method=p.adjust.m)
+  sig = c(rep('',length(p.adjusted)))
+  sig[p.adjusted <= 0.05] <-'.'
+  sig[p.adjusted <= 0.01] <-'*'
+  sig[p.adjusted <= 0.001] <-'**'
+  sig[p.adjusted <= 0.0001] <-'***'
+  
+  pairw.res = data.frame(pairs,F.Model,R2,p.value,p.adjusted,sig)
+  print("Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1")
+  return(pairw.res)
+  
+} 
+
+
+
+#Pairwise PERMANOVA across horizontal space
+pairwise.adonis(edna_index_values, sampledf_noshore$Depth_m)
+
+```
+
+The 0-10, 0-9, 0-5, 10-1 and 1-9 stations are most significantly different from one another (p=0.01). The 10-5 (p=0.05) and 1-5 (p=0.02) stations are moderately significantly different from one another. The 0-1 (p=1), 10-9 (p=1) and 5-9 (p=0.13) are not different from each other. 
+<br />
+
+We conducted a Betadisper test to examine the homogeneity of group dispersions across depth.
+<br />
+```{r betadisper depth}
+
+#Create the Bray-Curtis dissimilarity matrix for offshore abundances
+d_carn_noshore <- vegdist(edna_index_values, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_noshore, getElement(sampledf_noshore, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_noshore, getElement(sampledf_noshore, "Location"))))
+
+```
+
+Only the 1m-5m stations are significantly different in their dispersions (p=0.0167). <br />
+
+We will then calculate the apportioned variance and determine how each environmental variable contributes to the variation in eDNA signatures.
+
+
+```{r Apportioned variance, results="hide",warning=FALSE}
+
+#Apportioning variance: OTU counts
+OTU.count.adonis <- adonis(edna_index_values ~ sampledf_noshore$Depth_m + sampledf_noshore$Collected_Date + sampledf_noshore$Replicate)$aov.tab
+OTU.count.adonis
+
+#Set up for Q Plot
+q<-as.data.frame(OTU.count.adonis)
+row.names(q)<-c("Depth Station", "Collected Date", "Replicate", "Residuals", "Total") #must match names correctly
+q<-data.frame(row.names(q), q)
+names(q)[1]<-"Level"
+q<-q[-which(row.names(q)=="Total"),]
+q$Level<-paste(q$Level, "\n",
+               round(q$R2,2), " (", q$Pr..F., ")", 
+               sep="")
+#Plot Figure 
+q0.plot<-ggplot(q, aes(area = R2, label=Level))+
+  geom_treemap(fill=brewer.pal(4, "Blues")[1:4], color=1, alpha=.8)+
+  geom_treemap_text(colour = "black", place = "centre", grow = FALSE, size=20)+
+  ggtitle("Apportioned Variance")+
+  theme(plot.background = element_blank())+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+q0.plot
+
+```
+
+The apportioned variance still shows a large amount of unexplained variance. Depth station accounts for 16% of the variation, Collected date accounts for 14% of the variation and Replicate accounts for 3% of the variation.
+<br />
+
+We will now run a Mantel Test and visualize the results on an NMDS. 
+
+```{r Mantel Test}
+
+#Mantel Test
+#use edna_index_values as data frame
+dist.edna_index_values <- vegdist(edna_index_values, method = "bray")
+dist.depth <- vegdist(sampledf_noshore$Depth_m, method = "euclidean")
+mantel_test <- mantel(dist.edna_index_values, dist.depth, method = "spearman", permutations = 999)
+mantel_test
+
+```
+
+The Mantel test gives r=0.4045 with p=0.001. We will now visualize community similarity across depth station using an NMDS. <br />
+
+```{r NMDS}
+
+#Plot NMDS
+edna_index_values <- as.matrix(edna_index_values)
+nmds <- metaMDS(edna_index_values, distance = "bray")
+nmds #stress = 0.17825
+
+data.scores <- as.data.frame(scores(nmds))
+
+data.scores$Depth <- sampledf_noshore$Depth_m
+data.scores
+
+data.scores %>% 
+  rownames_to_column("ID") %>% 
+  separate(ID, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_")) %>% 
+  select(-Station, -Replicate, -miu_elas) -> data.scores
+  
+
+nmds_all <- ggplot(data.scores, aes(x = NMDS1, NMDS2)) +
+  geom_point(size = 5, aes(colour = Depth, shape = Day)) +
+    theme(axis.text.y = element_text(colour = "black", size = 15), 
+    axis.text.x = element_text(colour = "black", size = 15), 
+    legend.text = element_text(size = 15, colour ="black"), 
+    legend.position = "right", axis.title.y = element_text(face = "bold", size = 20), 
+    axis.title.x= element_text(face = "bold", size = 20, colour = "black"), 
+    legend.title = element_text(size = 20, colour = "black", face = "bold"), 
+    panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+    legend.key=element_blank()) +
+  scale_color_gradient2(low ="plum4", mid = "lightgoldenrod2", high = "springgreen3", midpoint = 5, space = "Lab", guide = "colourbar", aesthetics = "colour")
+
+nmds_all
+
+```
+Note: the Depth legend direction (10 -> 0) was flipped (0 -> 10) after figure export. 
+
+Nearshore vs. surf zone analyses
+
+We will now assess community differences across horizontal space (nearshore vs. surf zone). We will compare specifically the shore and 1 m stations, since these samples were collected at comparable depths across horizontal space.
+
+```{r PERMANOVA with shore and 1m stations}
+
+horizontal_values <- as.data.frame(carnivore_rel_abun)
+horizontal_values <- rownames_to_column(horizontal_values, "Sample_name")
+  
+horizontal_values <- sampledf %>% 
+  left_join(horizontal_values)
+
+
+horizontal_values <- horizontal_values %>% 
+  filter(Location == "SHR" | Location == "1m") %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+
+  
+rownames(horizontal_values) <- horizontal_values[,1] 
+
+horizontal_values <- horizontal_values %>% 
+  select(-Sample_name)
+
+
+sampledf_shr_1m<- sampledf %>% 
+  filter(Location == "SHR" | Location == "1m")
+
+adonis(horizontal_values ~ sampledf_shr_1m$Location,  distance = "bray", permutations = 999)
+adonis(horizontal_values ~ sampledf_shr_1m$Location + sampledf_shr_1m$Replicate + sampledf_shr_1m$Collected_Date,  distance = "bray", permutations = 999)
+
+```
+
+The communities between the shore and 1 m station differed significantly (p=0.001). We will also assess group dispersions. 
+
+```{r shr vs. 1m group dispersion}
+
+#Create the Bray-Curtis dissimilarity matrix for offshore abundances
+d_carn_shr_1m <- vegdist(horizontal_values, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_shr_1m , getElement(sampledf_shr_1m, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_shr_1m , getElement(sampledf_shr_1m, "Location"))))
+```
+Group dispersions differed between the shore and 1 m station (p=0.002) <br />
+
+
+We will now run a gradientForest model with the offshore stations. 
+
+```{r GradientForest Offshore, results="hide",warning=FALSE}
+
+#Remake Indexed OTU table
+ind_val <- as.data.frame(edna_index_values)
+
+#Make Numeric
+ind_val <- sapply(ind_val, as.numeric)
+
+#Re apply row and col names
+row.names(ind_val) <- row.names(edna_index_values)
+colnames(ind_val) <- colnames(edna_index_values)
+
+#Rename Column Names
+species_names <- colnames(edna_index_values)
+easy_name <- vector(length=length(species_names))
+
+for (i in 1:length(easy_name)) {
+  easy_name[i] <- paste0("species", i)
+}
+
+#Store Name Pairs
+species_list <- as.list(easy_name,species_names)
+names(species_names) <- easy_name
+
+#input and format metadata
+input_meta_path2 <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_gradientForest_offshore_4.1.20.txt"
+metadata2 <- read.table(input_meta_path2, header = 1, sep = "\t", stringsAsFactors = F)
+metadata2 <- as.data.frame(metadata2)
+row_namers <- metadata2$Sample_name
+metadata2 <- sapply(metadata2, as.numeric)
+row.names(metadata2) <- row_namers
+metadata2 <- metadata2[,2:5]
+metadata2 <- metadata2[,-3]
+
+datDF_carn<-merge(metadata2,ind_val,by="row.names")
+g <- length(datDF_carn)
+row_namers2 <- row.names(ind_val)
+datDF_carn <- sapply(datDF_carn, as.numeric)
+datDF_carn <- datDF_carn[,2:g]
+datDF_carn <- as.data.frame(datDF_carn)
+row.names(datDF_carn) <- row_namers2 
+
+########################################
+#       GRADIENT FOREST OFFSHORE       #
+########################################
+
+eDNA_gradFor<-gradientForest(datDF_carn,
+                             predictor.vars = colnames(metadata2), 
+                             response.vars = colnames(ind_val),
+                             ntree = 500, transform = NULL, compact = F,
+                             corr.threshold = 0.5, trace=T)
+
+```
+
+After creating the model, we will plot the overall importance of the environmental variables and the performance of each species. 
+
+```{r Overall Importance of Environmental Variables}
+
+#Plot Overall Importance of Environmental Variables
+importance(eDNA_gradFor)
+
+plot(eDNA_gradFor,plot.type="Overall.Importance", col = c(col_mpa), cex.axis = 0.8)
+
+```
+The overall importance of the variables are as follows: R2 weighted importance is Depth_m (0.110997987), Collected_Date (0.109528793), Replicate (0.006041575). Accuracy importance is Depth_m (0.01017388), Collected_Date (0.009626591), Replicate (-0.001568542)
+
+<br />
+
+```{r Species performances}
+
+#R^2 fit for each species
+plot(eDNA_gradFor, plot.type = "Performance", show.names = F, horizontal = F,
+     cex.axis = 1, cex.labels = 0.7, line = 2.5)
+
+```
+
+
+```{r Sort species by performance}
+
+sort(eDNA_gradFor$result, decreasing=T) -> sort_species
+sort_species[1:14]
+
+```
+There are 14 species with performance values above 0.35. Note: these analyses were not presented in the manuscript. Instead, we present the core taxa gradient forest models. 
+
+Alphadiversity Analyses 
+
+We will now run species richness analyses using eDNA read counts. First, we will create a new phyloseq object with eDNA read counts.
+
+```{r Read in read count data}
+ASV.table.counts <- read_csv(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/ASV_post_occ_sum_taxonomy_pres_abs_separate.csv")
+```
+
+```{r Create Phyloseq Object}
+
+#Convert the data into a phyloseq object
+physeq_obj.counts <- convert_anacapa_to_phyloseq(ASV.table.counts, metadata)
+
+#Remove unassigned taxa and known contaminants (land mammals)
+badTaxa = c("Unassigned", "Chordata;Actinopteri;;;;","Chordata;Mammalia;Primates;Hominidae;Homo;Homo sapiens", "Chordata;Mammalia;;Bovidae;Bos;Bos taurus", "Chordata;Actinopteri;Cypriniformes;Cyprinidae;Ctenopharyngodon;Ctenopharyngodon idella", "Chordata;Aves;Galliformes;Phasianidae;Meleagris;Meleagris gallopavo", "Chordata;Mammalia;Primates;Hominidae;Pan;Pan paniscus", "Chordata;Mammalia;NA;Bovidae;Bison;Bison bonasus", "Chordata;Mammalia;NA;Suidae;Sus;Sus salvanius", "Chordata;Mammalia;Primates;Hominidae;Gorilla;Gorilla gorilla", "Chordata;Mammalia;Carnivora;Canidae;Canis;Canis lupus", "Chordata;Mammalia;Artiodactyla;Bovidae;Bison;Bison bison", "Chordata;Mammalia;Artiodactyla;Suidae;Sus;Sus scrofa", "Chordata;Aves;Galliformes;Phasianidae;Gallus;Gallus gallus", "Chordata;Mammalia;Primates;Cercopithecidae;Macaca;Macaca fascicularis")  
+goodTaxa <- setdiff(taxa_names(physeq_obj.counts), badTaxa)
+physeq_obj.counts <- prune_taxa(goodTaxa, physeq_obj.counts)
+
+physeq_obj.counts
+
+```
+
+```{r Remove Non-Native Species}
+
+#Remove known non-native taxa
+badTaxa.nonnative = c("Chordata;Actinopteri;;Pomacentridae;Stegastes;Stegastes nigricans", "Chordata;Actinopteri;Perciformes;Serranidae;Epinephelus;Epinephelus merra") 
+#
+goodTaxa.nonnative <- setdiff(taxa_names(physeq_obj.counts), badTaxa.nonnative)
+physeq_obj.counts <- prune_taxa(goodTaxa.nonnative, physeq_obj.counts)
+
+```
+
+Now we will run an ANOVA and Post hoc Tukey test to assess species richness across depths (excluding the shore station).
+
+```{r, ANOVA Observed Taxa Between Depths}
+
+#ANOVA between depths
+alpha.diversity <- estimate_richness(physeq_obj.counts, measures = c("Observed"))
+data <- cbind(sample_data(physeq_obj.counts), alpha.diversity)
+
+
+data %>% 
+  filter(Location != "SHR") -> data_noshore
+
+#Summary table of species across depths
+data_noshore %>% 
+  group_by(Location) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+#Location
+#0m	  31.44444	283		
+#10m	44.80000	448		
+#1m	  32.11111	289		
+#5m	  38.22222	344		
+#9m	  45.66667	411		
+
+model=lm(data_noshore$Observed ~ data_noshore$Location)
+ANOVA=aov(model)
+summary(ANOVA)
+
+```
+
+Species richness differed significantly across depth (p=0.00003). We will now run post-hoc Tukey tests.
+
+```{r Tukey HSD}
+
+#Tukey HSD test
+data_noshore$Location <- as.factor(data_noshore$Location) #ensure that Depths are factors
+TUKEY <- TukeyHSD(x=ANOVA, 'data_noshore$Location', conf.level=0.95)
+TUKEY
+
+```
+
+The 0-10, 0-9, 1-10, and 1-9 stations all differed from each other. We will visualize this relationship on a boxplot. 
+
+```{r Observed Taxa Box Plot}
+
+#Observed Taxa Box Plot Across Depth
+#Function for determining signficant Groups from Tukey
+generate_label_df <- function(TUKEY, variable){
+  
+  # Extract labels and factor levels from Tukey post-hoc 
+  Tukey.levels <- TUKEY[[variable]][,4]
+  Tukey.labels <- data.frame(multcompLetters(Tukey.levels)['Letters'])
+  
+  #I need to put the labels in the same order as in the boxplot :
+  Tukey.labels$treatment=rownames(Tukey.labels)
+  Tukey.labels=Tukey.labels[order(Tukey.labels$treatment) , ]
+  return(Tukey.labels)
+}
+
+#Determine Groups of Samples
+labels<-generate_label_df(TUKEY, "data_noshore$Location") #generate labels of groups using function
+names(labels)<-c('Letters','Location') #rename columns for merging
+
+#Obtain letter position for y axis using means
+yvalue<-aggregate(Observed~Location, data=data_noshore, mean) 
+
+final<-merge(labels,yvalue) #merge dataframes
+
+#Color palette to identify boxplot depth groups (shore, shallow, mid, deep)
+col.groups <- c(col3.gr[3], col3.gr[3], col3.gr[2], col8.gr[1], col8.gr[1])
+
+#Plot Boxplot of Observed Species w/ Signficant Groups labeled
+
+t_all <- ggplot(data_noshore, aes(x = Location, y = Observed)) + 
+  geom_boxplot(fill = col.groups) +
+  geom_jitter(width = 0) + 
+  theme_bw() + theme_ranacapa() +theme(legend.position="none", axis.title = element_text(size = 20), axis.text = element_text(size = 15)) + 
+  geom_text(data = final, aes(x = Location, y = Observed, label = Letters), vjust=-15,hjust=1.25)+ ylab("Observed Species") + xlab("Depth Station")
+                 
+#Reoder boxplot in order of decreasing depth
+neworder = c("0m", "1m", "5m", "9m", "10m")
+t_all$data$Location <- factor(t_all$data$Location, levels=neworder)
+t_all
+
+```
+
+We will now compare species richness between nearshore and surf zone habitats using the eDNA read counts from the shore and 1m station.
+
+```{r Mean Species Richness in shore station}
+shr_vs_1m %>% 
+  filter(Location == "SHR") %>% 
+  select(Observed) %>% 
+  summary()
+```
+
+The shore station had a mean of 44.1 species. 
+
+```{r Nearshore vs. Surf Zone t-test}
+
+data %>% 
+  filter(Location == "SHR" | Location == "1m") -> shr_vs_1m
+
+t.test(Observed ~ Location, data = shr_vs_1m)
+
+
+```
+
+There are significantly more species in the shore station than the 1m station (p=0.0172). 
+
+We will also look at species richness across sampling days.
+
+```{r, Observed Taxa Across Days}
+
+#ANOVA between depths
+alpha.diversity <- estimate_richness(physeq_obj.counts, measures = c("Observed"))
+data <- cbind(sample_data(physeq_obj.counts), alpha.diversity)
+
+#Summary table of species
+data %>% 
+  group_by(Collected_Date) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+#Day
+#Day_1	37.83333	681	
+#Day_2	38.10526	724	
+#Day_3	42.61111	767	
+
+summary(aov(lm(data$Observed ~ data$Collected_Date)))
+
+
+```
+
+There was no difference in species richness across days. <br />
+
+To assess the importance of settlement processes on eDNA, we wanted to see if pelagic species were present in the deep station samples.
+
+```{r Species in Deep Stations}
+
+species_9m <- physeq_obj.counts %>% subset_samples(Location == "9m")
+species_10m <- physeq_obj.counts %>% subset_samples(Location == "10m")
+
+
+species_9m <- prune_taxa(
+  taxa = apply(otu_table(species_9m), 1, function(x){sum(x>0) >= 1}), 
+  x = species_9m)
+
+species_10m <- prune_taxa(
+  taxa = apply(otu_table(species_10m), 1, function(x){sum(x>0) >= 1}), 
+  x = species_10m)
+
+
+species_9m <- taxa_names(species_9m)
+species_10m <- taxa_names(species_10m)
+
+species_9m_df <- as.data.frame(species_9m)
+species_10m_df <- as.data.frame(species_10m)
+
+
+names(species_9m_df) <- "Species"
+names(species_10m_df) <- "Species"
+
+species_9m_df
+
+species_10m_df
+
+```
+There were some pelagic species present at depth. However, as we will show in further analyses, the relative abundances of these pelagic species show higher abundances in the surface stations. 
+
+We will also run analyses using only the highest occurring taxa (present in at least 80% of the samples), called "core taxa". 
+
+Common Species analyses (only the species which occurred in 80% of the samples). There were 22 high occurring species.
+
+Betadiversity 
+
+We will first create a phyloseq object for the eDNA Index scores of the core taxa.
+
+```{r Creating the Core Taxa Phyloseq Object}
+
+hightaxa = c("Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Hermosilla;Hermosilla azurea", "Chordata;Mammalia;Carnivora;Otariidae;Zalophus;Zalophus californianus", "Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax nebulifer", "Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;Citharichthys stigmaeus", "Chordata;Actinopteri;Lutjaniformes;Haemulidae;Anisotremus;Anisotremus davidsonii", "Chordata;Actinopteri;;Sciaenidae;Umbrina;Umbrina roncador", "Chordata;Actinopteri;Blenniiformes;Gobiesocidae;Rimicola;Rimicola muscarum", "Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax clathratus", "Chordata;Actinopteri;;Sciaenidae;Menticirrhus;Menticirrhus undulatus", "Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Leuresthes;Leuresthes tenuis", "Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Girella;Girella nigricans", "Chordata;Actinopteri;;Sciaenidae;Seriphus;Seriphus politus", "Chordata;Actinopteri;Scombriformes;Scombridae;Scomber;Scomber japonicus", "Chordata;Chondrichthyes;Myliobatiformes;Myliobatidae;Myliobatis;Myliobatis californica", "Chordata;Actinopteri;;Embiotocidae;;", "Chordata;Actinopteri;;Embiotocidae;Embiotoca;Embiotoca jacksoni", "Chordata;Actinopteri;Clupeiformes;Engraulidae;Engraulis;Engraulis mordax", "Chordata;Actinopteri;Blenniiformes;Clinidae;Heterostichus;Heterostichus rostratus", "Chordata;Actinopteri;Blenniiformes;Clinidae;Gibbonsia;", "Chordata;Actinopteri;;Embiotocidae;Brachyistius;Brachyistius frenatus", "Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Atherinops;Atherinops affinis", 
+"Chordata;Actinopteri;Clupeiformes;Clupeidae;Sardinops;Sardinops sagax")
+
+physeq_obj_sub <- prune_taxa(hightaxa, physeq_obj)
+
+physeq_obj_sub
+
+```
+
+We now have 22 taxa across 55 samples. We will first run the apportioned variance analysis.
+
+```{r Extract tables from phyloseq object}
+
+#Generate vegan formatted data table
+sampledf_sub <- data.frame(sample_data(physeq_obj_sub))
+carnivore_rel_abun_sub<- vegan_otu(physeq_obj_sub)
+
+```
+
+We want to run the analysis for the offshore stations only, so we will rune the analyses without the shore station.
+
+```{r Remove Shore station values}
+#Remove shore values from metadata data frame 
+sampledf_sub <- sampledf_sub %>% 
+  filter(Depth_m >= 0)
+
+#Remove shore values from otu relative abundance data
+carnivore_rel_abun_sub <- as.data.frame(carnivore_rel_abun_sub)
+class(carnivore_rel_abun_sub)
+carnivore_rel_abun_sub <- rownames_to_column(carnivore_rel_abun_sub, "Sample_name")
+  
+carnivore_rel_abun_sub <- sampledf_sub %>% 
+  left_join(carnivore_rel_abun_sub)
+
+carnivore_rel_abun_sub <- carnivore_rel_abun_sub %>% 
+  filter(Depth_m >= 0) %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+  
+rownames(carnivore_rel_abun_sub) <- carnivore_rel_abun_sub[,1] 
+
+carnivore_rel_abun_sub <- carnivore_rel_abun_sub %>% 
+  select(-Sample_name)
+
+```
+
+```{r Apportioned Variance for depth gradient without shore station}
+
+OTU.count.adonis_sub <- adonis(carnivore_rel_abun_sub ~ sampledf_sub$Depth_m + sampledf_sub$Collected_Date + sampledf_sub$Replicate)$aov.tab
+OTU.count.adonis_sub
+
+#Set up for Q Plot
+q_sub<-as.data.frame(OTU.count.adonis_sub)
+row.names(q_sub)<-c("Depth Station", "Collected Date", "Replicate", "Residuals", "Total") #must match names correctly
+q_sub<-data.frame(row.names(q_sub), q_sub)
+names(q_sub)[1]<-"Level"
+q_sub<-q_sub[-which(row.names(q_sub)=="Total"),]
+q_sub$Level<-paste(q_sub$Level, "\n",
+               round(q_sub$R2,2), " (", q_sub$Pr..F., ")", 
+               sep="")
+#Plot Figure 
+q0.plot.sub <-ggplot(q_sub, aes(area = R2, label=Level))+
+  geom_treemap(fill=brewer.pal(4, "Blues")[1:4], color=1, alpha=.8)+
+  geom_treemap_text(colour = "black", place = "centre", grow = FALSE, size=20)+
+  ggtitle("Apportioned Variance")+
+  theme(plot.background = element_blank())+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+q0.plot.sub
+```
+
+Now we will conduct the other betadiversity analyses (PERMANOVA, pairwise PERMANOVA, Mantel Test, NMDS) that we computed for all taxa above. First we will conduct the PERMANOVA.
+
+```{r PERMANOVA for common species}
+adonis(carnivore_rel_abun_sub ~ sampledf_sub$Depth_m + sampledf_sub$Collected_Date + sampledf_sub$Replicate, distance = "bray", permutations = 999)
+```
+
+```{r Pairwise PERMANOVA across depth, common species}
+pairwise.adonis(carnivore_rel_abun_sub, sampledf_sub$Depth_m)
+
+```
+The pairwise PERMANOVA significance patterns are the same as with all species, except the p-value for the 1-5 comparison is above the significance threshold of alpha=0.05. We will now run a test of group dispersions. <br />
+
+```{r betadisper depth for common species}
+
+#Create the Bray-Curtis dissimilarity matrix for offshore abundances
+d_carn_sub <- vegdist(carnivore_rel_abun_sub, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_sub, getElement(sampledf_sub, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_sub, getElement(sampledf_sub, "Location"))))
+
+```
+There are no significant group dispersion differences across depth. We will now run a Mantel Test.
+
+```{r Mantel Test for common species}
+#Mantel Test
+#use carnivore_rel_abun_sub as data frame
+dist.carnivore_rel_abun_sub <- vegdist(carnivore_rel_abun_sub, method = "bray")
+dist.depth_sub <- vegdist(sampledf_sub$Depth_m, method = "euclidean")
+mantel_test_sub <- mantel(dist.carnivore_rel_abun_sub, dist.depth_sub, method = "spearman", permutations = 999)
+mantel_test_sub #r=0.4573, p=0.001
+
+```
+
+The Mantel statistic is r=0.4573 with a p-value of 0.001. We will now visualize community dissimilarity with an NMDS. 
+
+```{r NMDS for common species}
+#Plot NMDS
+carnivore_rel_abun_sub <- as.matrix(carnivore_rel_abun_sub)
+nmds_sub <- metaMDS(carnivore_rel_abun_sub, distance = "bray")
+nmds_sub #0.1575889
+
+data.scores_sub <- as.data.frame(scores(nmds_sub))
+
+data.scores_sub$Depth <- sampledf_sub$Depth_m
+data.scores_sub
+
+
+data.scores_sub %>% 
+  rownames_to_column("ID") %>% 
+  separate(ID, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_")) %>% 
+  select(-Station, -Replicate, -miu_elas) -> data.scores_sub
+
+
+nmds_sub <- ggplot(data.scores_sub, aes(x = NMDS1, NMDS2)) +
+  geom_point(size = 5, aes(colour = Depth, shape = Day)) +
+    theme(axis.text.y = element_text(colour = "black", size = 15), 
+    axis.text.x = element_text(colour = "black", size = 15), 
+    legend.text = element_text(size = 15, colour ="black"), 
+    legend.position = "right", axis.title.y = element_text(face = "bold", size = 20), 
+    axis.title.x= element_text(face = "bold", size = 20, colour = "black"), 
+    legend.title = element_text(size = 20, colour = "black", face = "bold"), 
+    panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+    legend.key=element_blank()) +
+  scale_color_gradient2(low ="plum4", mid = "lightgoldenrod2", high = "springgreen3", midpoint = 5, space = "Lab", guide = "colourbar", aesthetics = "colour")
+
+nmds_sub
+
+```
+
+Nearshore vs. Surf Zone analyses
+
+We will now run PERMANOVA and betadisper tests to test for nearshore vs. surf zone community differences using the shore and 1m station eDNA index scores.
+
+```{r Nearshore vs. Surf Zone, common species}
+
+#
+sampledf_withshore <- data.frame(sample_data(physeq_obj_sub))
+carnivore_rel_abun_withshore<- vegan_otu(physeq_obj_sub)
+d_carn_withshore <- vegdist(carnivore_rel_abun_withshore, method="bray") 
+
+```
+
+
+```{r PERMANOVA for shr and 1m stations for core taxa}
+
+horizontal_values_sub <- as.data.frame(carnivore_rel_abun_withshore)
+horizontal_values_sub <- rownames_to_column(horizontal_values_sub, "Sample_name")
+  
+horizontal_values_sub <- sampledf %>% 
+  left_join(horizontal_values_sub)
+
+
+horizontal_values_sub <- horizontal_values_sub %>% 
+  filter(Location == "SHR" | Location == "1m") %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+
+  
+rownames(horizontal_values_sub) <- horizontal_values_sub[,1] 
+
+horizontal_values_sub <- horizontal_values_sub %>% 
+  select(-Sample_name)
+
+
+sampledf_shr_1m<- sampledf %>% 
+  filter(Location == "SHR" | Location == "1m")
+
+adonis(horizontal_values_sub ~ sampledf_shr_1m$Location,  distance = "bray", permutations = 999)
+
+adonis(horizontal_values_sub ~ sampledf_shr_1m$Location + sampledf_shr_1m$Replicate + sampledf_shr_1m$Collected_Date,  distance = "bray", permutations = 999)
+
+```
+
+Community composition differed between shore and 1m stations (p=0.001).
+
+```{r group dispersions for core taxa in shr and 1m stations}
+
+d_carn_shr_1m_sub <- vegdist(horizontal_values_sub, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_shr_1m_sub , getElement(sampledf_shr_1m, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_shr_1m_sub, getElement(sampledf_shr_1m, "Location"))))
+
+```
+Group dispersion differed significantly between the shore and 1m stations (p=0.009). <br />
+
+
+We will now visualize the differences across nearshore vs. surf zone habitats in an NMDS. 
+
+```{r NMDS for common species shr and 1 m}
+#Plot NMDS
+horizontal_values_matrix_sub <- as.matrix(horizontal_values_sub)
+nmds_horizontal_sub <- metaMDS(horizontal_values_matrix_sub, distance = "bray")
+nmds_horizontal_sub #0.08207569
+
+data.scores_horizontal_sub <- as.data.frame(scores(nmds_horizontal_sub))
+
+data.scores_horizontal_sub$Location <- sampledf_shr_1m$Location
+data.scores_horizontal_sub
+
+
+
+nmds_horizontal_sub <- ggplot(data.scores_horizontal_sub, aes(x = NMDS1, NMDS2)) +
+  geom_point(size = 5, aes(colour = Location)) +
+    theme(axis.text.y = element_text(colour = "black", size = 15), 
+    axis.text.x = element_text(colour = "black", size = 15), 
+    legend.text = element_text(size = 15, colour ="black"), 
+    legend.position = "right", axis.title.y = element_text(face = "bold", size = 20), 
+    axis.title.x= element_text(face = "bold", size = 20, colour = "black"), 
+    legend.title = element_text(size = 20, colour = "black", face = "bold"), 
+    panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+    legend.key=element_blank())
+
+nmds_horizontal_sub
+
+```
+
+Gradient Forest Analysis
+
+We will now run a gradientForest model with the offshore stations for the core taxa. 
+
+```{r GradientForest Offshore, common species, results="hide",warning=FALSE}
+
+#Remake Indexed OTU table
+ind_val <- as.data.frame(carnivore_rel_abun_sub)
+
+#Make Numeric
+ind_val <- sapply(ind_val, as.numeric)
+
+#Re apply row and col names
+row.names(ind_val) <- row.names(carnivore_rel_abun_sub)
+colnames(ind_val) <- colnames(carnivore_rel_abun_sub)
+
+#Rename Column Names
+species_names <- colnames(carnivore_rel_abun_sub)
+easy_name <- vector(length=length(species_names))
+
+for (i in 1:length(easy_name)) {
+  easy_name[i] <- paste0("species", i)
+}
+
+#Store Name Pairs
+species_list <- as.list(easy_name,species_names)
+names(species_names) <- easy_name
+
+
+datDF_carn<-merge(metadata2,ind_val,by="row.names")
+g <- length(datDF_carn)
+row_namers2 <- row.names(ind_val)
+datDF_carn <- sapply(datDF_carn, as.numeric)
+datDF_carn <- datDF_carn[,2:g]
+datDF_carn <- as.data.frame(datDF_carn)
+row.names(datDF_carn) <- row_namers2 
+
+
+###################################################
+# GRADIENT FOREST OFFSHORE (common species)       #
+###################################################
+
+eDNA_gradFor2<-gradientForest(datDF_carn,
+                             predictor.vars = colnames(metadata2), 
+                             response.vars = colnames(ind_val),
+                             ntree = 500, transform = NULL, compact = F,
+                             corr.threshold = 0.5, trace=T)
+
+```
+
+After creating the model, we will plot the overall importance of the environmental variables and the performance of each species. 
+
+```{r Overall Importance of Environmental Variables, common species}
+
+#Plot Overall Importance of Environmental Variables
+importance(eDNA_gradFor2)
+
+plot(eDNA_gradFor2,plot.type="Overall.Importance", col = c(col_mpa), cex.axis = 0.8)
+
+```
+The overall importance of the variables are as follows: R2 weighted importance is Depth_m (0.1827139878, Collected_Date (0.1823526354), Replicate (0.0002219438). Accuracy importance is Depth_m (0.01524016), Collected_Date (0.01211755), Replicate (-0.003197894)
+<br />
+
+We will then assess the species performances in the gradientForest model. 
+
+```{r Species performances, common species}
+
+#R^2 fit for each species
+plot(eDNA_gradFor2, plot.type = "Performance", show.names = F, horizontal = F,
+     cex.axis = 1, cex.labels = 0.7, line = 2.5)
+
+```
+
+```{r Sort species by performance}
+
+sort(eDNA_gradFor2$result, decreasing=T) -> sort_species2
+sort_species2
+
+```
+There are 12 species above 34% species performance. Their distributions are plotted below. 
+
+This first code chunk removes the ASV lines from the barplot in the plotting function in physeq.
+
+```{r Remove ASV black lines from barplot}
+
+#Remove the ASV black lines by changing the plot_bar phyloseq function
+my_plot_bar = function (physeq, x = "Sample", y = "Abundance", fill = NULL, title = NULL, 
+                        facet_grid = NULL) {
+    mdf = psmelt(physeq)
+    p = ggplot(mdf, aes_string(x = x, y = y, fill = fill))
+    p = p + geom_bar(stat = "identity", position = "stack")
+    p = p + theme(axis.text.x = element_text(angle = -90, hjust = 0))
+    if (!is.null(facet_grid)) {
+        p <- p + facet_grid(facet_grid)
+    }
+    if (!is.null(title)) {
+        p <- p + ggtitle(title)
+    }
+    return(p)
+}
+```
+
+For each top performing species in the gradient forest model, we plotted their eDNA index score across days. We also plotted their depth distributions and their depth distributions across days. We also ran a model to assess the interaction between depth and sampling day. 
+
+Species 1 (*Sardinops sagax*)
+
+
+```{r Species 1}
+#Sardinops sagax (neritic)
+
+SarSa <- sort_species2[1]
+GoodSarSa = names(SarSa)
+BadSarSa <- setdiff(taxa_names(physeq_obj_sub), GoodSarSa)
+Sar_Sa<- prune_taxa(GoodSarSa, physeq_obj_sub)
+taxa_names(Sar_Sa)
+
+vegan_otu(Sar_Sa) -> sar_sa_table
+
+sar_sa_table <- as.data.frame(sar_sa_table)
+
+```
+
+```{r Species 1 day:depth interaction}
+library(car)
+sar_sa_table %>%
+  rename(Species = colnames(sar_sa_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sar_sa_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sar_sa_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sar_sa_table)) -> aov_sarsa
+
+p.adjust(aov_sarsa$`Pr(>F)`, method = "bonferroni")
+
+
+```
+
+The last value in the p adjusted output is the p-value for the interaction between Depth:Day.
+
+```{r Species 1 depth distribution}
+sar_sa_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_depth
+
+sar_sa_depth %>% 
+  subset(Station != "SHR") -> sar_sa_depth
+
+ggplot(sar_sa_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Sardinops sagax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa
+
+
+#Reorder stations
+neworder = c("0m", "1m", "5m", "9m", "10m")
+sarsa$data$Station <- factor(sarsa$data$Station, levels=neworder)
+sarsa
+
+```
+
+```{r Species 1 day distribution}
+
+sar_sa_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_day
+
+
+
+ggplot(sar_sa_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Sardinops sagax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 1 depth distribution in Day 1}
+
+sar_sa_table %>% 
+  subset(Day == "D1") -> sar_sa_sep_D1
+
+sar_sa_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_sep_D1
+
+ggplot(sar_sa_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Sardinops sagax Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa_D1
+
+neworder_full = c("SHR", "0m", "1m", "5m", "9m", "10m")
+sarsa_D1$data$Station <- factor(sarsa_D1$data$Station, levels=neworder_full)
+sarsa_D1
+
+```
+
+```{r Species 1 depth distribution in Day 2}
+sar_sa_table %>% 
+  subset(Day == "D2") -> sar_sa_sep_D2
+
+sar_sa_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_sep_D2
+
+ggplot(sar_sa_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Sardinops sagax Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa_D2
+
+sarsa_D2$data$Station <- factor(sarsa_D2$data$Station, levels=neworder_full)
+sarsa_D2
+
+```
+
+```{r Species 1 depth distribution in Day 3}
+
+sar_sa_table %>% 
+  subset(Day == "D3") -> sar_sa_sep_D3
+
+sar_sa_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_sep_D3
+
+ggplot(sar_sa_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Sardinops sagax Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa_D3
+
+sarsa_D3$data$Station <- factor(sarsa_D3$data$Station, levels=neworder_full)
+sarsa_D3
+
+
+```
+
+Species 2 (*Umbrina roncador*)
+
+
+```{r Species 2}
+#Umbrina roncador (demersal)
+
+UmbRo <- sort_species2[2]
+GoodUmbRo = names(UmbRo)
+BadUmbRo <- setdiff(taxa_names(physeq_obj_sub), GoodUmbRo)
+Umb_Ro <- prune_taxa(GoodUmbRo, physeq_obj_sub)
+taxa_names(Umb_Ro)
+
+vegan_otu(Umb_Ro) -> umb_ro_table
+
+umb_ro_table <- as.data.frame(umb_ro_table)
+
+
+```
+
+
+```{r Species 2 day:depth}
+umb_ro_table %>%
+  rename(Species = colnames(umb_ro_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> umb_ro_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = umb_ro_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = umb_ro_table)) -> aov_umbro
+
+p.adjust(aov_umbro$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r Species 2 depth distribution}
+
+umb_ro_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_depth
+
+umb_ro_depth %>% 
+  subset(Station != "SHR") -> umb_ro_depth
+
+ggplot(umb_ro_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Umbrina roncador") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umb
+
+#Reorder stations
+umb$data$Station <- factor(umb$data$Station, levels=neworder)
+umb
+
+```
+
+```{r Species 2 day distribution}
+
+umb_ro_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_day
+
+ggplot(umb_ro_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Umbrina roncador") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 1 depth distribution in Day 1}
+
+umb_ro_table %>% 
+  subset(Day == "D1") -> umb_ro_sep_D1
+
+umb_ro_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_sep_D1
+
+ggplot(umb_ro_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Umbrina roncador Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro_D1
+
+umbro_D1$data$Station <- factor(umbro_D1$data$Station, levels=neworder_full)
+umbro_D1
+
+```
+
+```{r Species 2 depth distribution in Day 2}
+
+umb_ro_table %>% 
+  subset(Day == "D2") -> umb_ro_sep_D2
+
+umb_ro_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_sep_D2
+
+ggplot(umb_ro_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Umbrina roncador Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro_D2
+
+umbro_D2$data$Station <- factor(umbro_D2$data$Station, levels=neworder_full)
+umbro_D2
+
+```
+
+```{r Species 2 depth distribution in Day 3}
+
+umb_ro_table %>% 
+  subset(Day == "D3") -> umb_ro_sep_D3
+
+umb_ro_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_sep_D3
+
+ggplot(umb_ro_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Umbrina roncador Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro_D3
+
+umbro_D3$data$Station <- factor(umbro_D3$data$Station, levels=neworder_full)
+umbro_D3
+
+```
+
+Species 3 (*Paralabrax nebulifer*)
+
+```{r Species 3}
+#Paralabrax nebulifer (reef associated)
+
+ParNe <- sort_species2[3]
+GoodParNe = names(ParNe)
+BadParNe <- setdiff(taxa_names(physeq_obj_sub), GoodParNe)
+Par_Ne <- prune_taxa(GoodParNe, physeq_obj_sub)
+taxa_names(Par_Ne)
+
+vegan_otu(Par_Ne) -> par_ne_table
+
+par_ne_table <- as.data.frame(par_ne_table)
+
+```
+
+```{r Species 3 day:depth}
+par_ne_table %>%
+  rename(Species = colnames(par_ne_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> par_ne_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_ne_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_ne_table)) -> aov_parne
+
+p.adjust(aov_parne$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 3 depth distribution}
+par_ne_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_depth
+
+par_ne_depth %>% 
+  subset(Station != "SHR") -> par_ne_depth
+
+ggplot(par_ne_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax nebulifer") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne
+
+#Reorder stations
+parne$data$Station <- factor(parne$data$Station, levels=neworder)
+parne
+
+```
+
+```{r Species 3 day distribution}
+
+par_ne_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_day
+
+
+
+ggplot(par_ne_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Paralabrax nebulifer") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 3 depth distribution in Day 1} 
+
+par_ne_table %>% 
+  subset(Day == "D1") -> par_ne_sep_D1
+
+par_ne_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_sep_D1
+
+ggplot(par_ne_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax nebulifer Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne_D1
+
+parne_D1$data$Station <- factor(parne_D1$data$Station, levels=neworder_full)
+parne_D1
+
+```
+
+```{r Species 3 depth distribution in Day 2}
+
+par_ne_table %>% 
+  subset(Day == "D2") -> par_ne_sep_D2
+
+par_ne_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_sep_D2
+
+ggplot(par_ne_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax nebulifer Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne_D2
+
+parne_D2$data$Station <- factor(parne_D2$data$Station, levels=neworder_full)
+parne_D2
+
+```
+
+```{r Species 3 depth distribution in Day 3}
+
+par_ne_table %>% 
+  subset(Day == "D3") -> par_ne_sep_D3
+
+par_ne_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_sep_D3
+
+ggplot(par_ne_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax nebulifer Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne_D3
+
+parne_D3$data$Station <- factor(parne_D3$data$Station, levels=neworder_full)
+parne_D3
+
+
+```
+
+Species 4 (*Engraulis mordax*)
+
+```{r Species 4}
+#Engraulis mordax (pelagic)
+
+EngMo <- sort_species2[4]
+GoodEngMo = names(EngMo)
+BadEngMo <- setdiff(taxa_names(physeq_obj_sub), GoodEngMo)
+Eng_Mo <- prune_taxa(GoodEngMo, physeq_obj_sub)
+taxa_names(Eng_Mo)
+
+vegan_otu(Eng_Mo) -> eng_mo_table
+
+eng_mo_table <- as.data.frame(eng_mo_table)
+
+```
+
+```{r Species 4 day:depth}
+
+eng_mo_table %>%
+  rename(Species = colnames(eng_mo_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> eng_mo_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = eng_mo_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = eng_mo_table)) -> aov_engmo
+
+p.adjust(aov_engmo$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 4 depth distribution}
+
+eng_mo_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_depth
+
+eng_mo_depth %>% 
+  subset(Station != "SHR") -> eng_mo_depth
+
+ggplot(eng_mo_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Engraulis mordax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> engmo
+
+#Reorder stations
+engmo$data$Station <- factor(engmo$data$Station, levels=neworder)
+engmo
+
+```
+
+```{r Species 4 day distribution}
+
+eng_mo_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_day
+
+
+ggplot(eng_mo_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Engraulis mordax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 4 depth distribution in Day 1}
+
+eng_mo_table %>% 
+  subset(Day == "D1") -> eng_mo_sep_D1
+
+eng_mo_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_sep_D1
+
+ggplot(eng_mo_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Engraulis mordax Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> engmo_D1
+
+engmo_D1$data$Station <- factor(engmo_D1$data$Station, levels=neworder_full)
+engmo_D1
+
+```
+
+```{r Species 4 depth distribution in Day 2}
+
+eng_mo_table %>% 
+  subset(Day == "D2") -> eng_mo_sep_D2
+
+eng_mo_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_sep_D2
+
+ggplot(eng_mo_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Engraulis mordax Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> engmo_D2
+
+engmo_D2$data$Station <- factor(engmo_D2$data$Station, levels=neworder_full)
+engmo_D2
+
+```
+
+```{r Species 4 depth distribution in Day 3}
+
+eng_mo_table %>% 
+  subset(Day == "D3") -> eng_mo_sep_D3
+
+eng_mo_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_sep_D3
+
+ggplot(eng_mo_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Engraulis mordax Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> engmo_D3
+
+engmo_D3$data$Station <- factor(engmo_D3$data$Station, levels=neworder_full)
+engmo_D3
+
+```
+
+Species 5 (*Paralabrax clathratus*)
+
+```{r Species 5}
+#Paralabrax clathratus (bentho-pelagic)
+
+ParCl <- sort_species2[5]
+GoodParCl = names(ParCl)
+BadParCl <- setdiff(taxa_names(physeq_obj_sub), GoodParCl)
+Par_Cl <- prune_taxa(GoodParCl, physeq_obj_sub)
+taxa_names(Par_Cl)
+
+vegan_otu(Par_Cl) -> par_cl_table
+
+par_cl_table <- as.data.frame(par_cl_table)
+
+```
+
+```{r Species 5 day:depth}
+
+par_cl_table %>%
+  rename(Species = colnames(par_cl_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas)  -> par_cl_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_cl_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_cl_table)) -> aov_parcl
+
+p.adjust(aov_parcl$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 5 depth distribution}
+
+par_cl_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_depth
+
+par_cl_depth %>% 
+  subset(Station != "SHR") -> par_cl_depth
+
+ggplot(par_cl_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax clathratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl
+
+#Reorder stations
+parcl$data$Station <- factor(parcl$data$Station, levels=neworder)
+parcl
+
+```
+
+```{r Species 5 day distribution}
+
+par_cl_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_day
+
+ggplot(par_cl_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Paralabrax clathratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 5 depth distribution in Day 1}
+
+par_cl_table %>% 
+  subset(Day == "D1") -> par_cl_sep_D1
+
+par_cl_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_sep_D1
+
+ggplot(par_cl_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax clathratus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl_D1
+
+parcl_D1$data$Station <- factor(parcl_D1$data$Station, levels=neworder_full)
+parcl_D1
+
+```
+
+```{r Species 5 depth distribution in Day 2}
+
+par_cl_table %>% 
+  subset(Day == "D2") -> par_cl_sep_D2
+
+par_cl_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_sep_D2
+
+ggplot(par_cl_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax clathratus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl_D2
+
+parcl_D2$data$Station <- factor(parcl_D2$data$Station, levels=neworder_full)
+parcl_D2
+
+```
+
+```{r Species 5 depth distribution in Day 3}
+
+par_cl_table %>% 
+  subset(Day == "D3") -> par_cl_sep_D3
+
+par_cl_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_sep_D3
+
+ggplot(par_cl_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Paralabrax clathratus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl_D3
+
+parcl_D3$data$Station <- factor(parcl_D3$data$Station, levels=neworder_full)
+parcl_D3
+
+```
+
+Species 6 (*Citharichthys stigmaeus*)
+
+```{r Species 6}
+#Citharichthys stigmaeus (demersal)
+
+CitSt <- sort_species2[6]
+GoodCitSt = names(CitSt)
+BadCitSt <- setdiff(taxa_names(physeq_obj_sub), GoodCitSt)
+Cit_St <- prune_taxa(GoodCitSt, physeq_obj_sub)
+taxa_names(Cit_St)
+
+vegan_otu(Cit_St) -> cit_st_table
+
+cit_st_table <- as.data.frame(cit_st_table)
+
+```
+
+```{r Species 6 depth:day}
+
+cit_st_table %>%
+  rename(Species = colnames(cit_st_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cit_st_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cit_st_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cit_st_table)) -> aov_citst
+
+p.adjust(aov_citst$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 6 depth distribution}
+
+cit_st_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_depth
+
+cit_st_depth %>% 
+  subset(Station != "SHR") -> cit_st_depth
+
+ggplot(cit_st_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Citharichthys stigmaeus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> citst
+
+#Reorder stations
+citst$data$Station <- factor(citst$data$Station, levels=neworder)
+citst
+
+```
+
+```{r Species 6 day distribution}
+
+cit_st_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_day
+
+ggplot(cit_st_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Citharichthys stigmaeus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 6 depth distribution in Day 1}
+
+cit_st_table %>% 
+  subset(Day == "D1") -> cit_st_sep_D1
+
+cit_st_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_sep_D1
+
+ggplot(cit_st_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Citharichthys stigmaeus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> citst_D1
+
+citst_D1$data$Station <- factor(citst_D1$data$Station, levels=neworder_full)
+citst_D1
+
+```
+
+```{r Species 6 depth distribution in Day 2}
+
+cit_st_table %>% 
+  subset(Day == "D2") -> cit_st_sep_D2
+
+cit_st_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_sep_D2
+
+ggplot(cit_st_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Citharichthys stigmaeus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> citst_D2
+
+citst_D2$data$Station <- factor(citst_D2$data$Station, levels=neworder_full)
+citst_D2
+
+```
+
+```{r Species 6 depth distribution in Day 3}
+
+cit_st_table %>% 
+  subset(Day == "D3") -> cit_st_sep_D3
+
+cit_st_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_sep_D3
+
+ggplot(cit_st_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Citharichthys stigmaeus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> citst_D3
+
+citst_D3$data$Station <- factor(citst_D3$data$Station, levels=neworder_full)
+citst_D3
+
+```
+
+Species 7 (*Menticirrhus undulatus*)
+
+```{r Species 7}
+
+#Menticirrhus undulatus (demersal)
+
+MenUn<- sort_species2[7]
+GoodMenUn = names(MenUn)
+BadMenUn <- setdiff(taxa_names(physeq_obj_sub), GoodMenUn)
+Men_Un <- prune_taxa(GoodMenUn, physeq_obj_sub)
+taxa_names(Men_Un)
+
+vegan_otu(Men_Un) -> men_un_table
+
+men_un_table <- as.data.frame(men_un_table)
+
+```
+
+```{r Species 7 day:depth}
+
+men_un_table %>%
+  rename(Species = colnames(men_un_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> men_un_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = men_un_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = men_un_table)) -> aov_menun
+
+p.adjust(aov_menun$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r Species 7 depth distribution}
+
+men_un_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_depth
+
+men_un_depth %>% 
+  subset(Station != "SHR") -> men_un_depth
+
+ggplot(men_un_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Menticirrhus undulatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun
+
+#Reorder stations
+menun$data$Station <- factor(menun$data$Station, levels=neworder)
+menun
+
+```
+
+``` {r Species 7 day distribution}
+
+men_un_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_day
+
+ggplot(men_un_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Menticirrhus undulatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 7 depth distribution in Day 1}
+
+men_un_table %>% 
+  subset(Day == "D1") -> men_un_sep_D1
+
+men_un_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_sep_D1
+
+ggplot(men_un_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Menticirrhus undulatus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun_D1
+
+menun_D1$data$Station <- factor(menun_D1$data$Station, levels=neworder_full)
+menun_D1
+
+```
+
+```{r Species 7 depth distribution in Day 2}
+
+men_un_table %>% 
+  subset(Day == "D2") -> men_un_sep_D2
+
+men_un_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_sep_D2
+
+ggplot(men_un_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Menticirrhus undulatus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun_D2
+
+menun_D2$data$Station <- factor(menun_D2$data$Station, levels=neworder_full)
+menun_D2
+
+```
+
+```{r Species 7 depth distribution in Day 3}
+
+men_un_table %>% 
+  subset(Day == "D3") -> men_un_sep_D3
+
+men_un_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_sep_D3
+
+ggplot(men_un_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Menticirrhus undulatus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun_D3
+
+menun_D3$data$Station <- factor(menun_D3$data$Station, levels=neworder_full)
+menun_D3
+
+```
+
+Species 8 (Family Embiotocidae)
+
+```{r Species 8}
+
+#Family Embiotocidae (demersal)
+
+FamEm<- sort_species2[8]
+GoodFamEm = names(FamEm)
+BadFamEm <- setdiff(taxa_names(physeq_obj_sub), GoodFamEm)
+Fam_Em <- prune_taxa(GoodFamEm, physeq_obj_sub)
+taxa_names(Fam_Em)
+
+vegan_otu(Fam_Em) -> fam_em_table
+
+fam_em_table <- as.data.frame(fam_em_table)
+
+```
+
+```{r Species 8 day:depth}
+
+fam_em_table %>%
+  rename(Species = colnames(fam_em_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> fam_em_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = fam_em_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = fam_em_table)) -> aov_famem
+
+p.adjust(aov_sarsa$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 7 depth distribution}
+
+fam_em_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_depth
+
+fam_em_depth %>% 
+  subset(Station != "SHR") -> fam_em_depth
+
+ggplot(fam_em_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Family Embiotocidae") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem
+
+#Reorder stations
+famem$data$Station <- factor(famem$data$Station, levels=neworder)
+famem
+
+```
+
+```{r Species 8 day distribution}
+
+fam_em_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_day
+
+ggplot(fam_em_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Family Embiotocidae") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 8 depth distribution in Day 1}
+
+fam_em_table %>% 
+  subset(Day == "D1") -> fam_em_sep_D1
+
+fam_em_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_sep_D1
+
+ggplot(fam_em_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Family Embiotocidae Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem_D1
+
+famem_D1$data$Station <- factor(famem_D1$data$Station, levels=neworder_full)
+famem_D1
+
+```
+
+```{r Species 8 depth distribution in Day 2}
+
+fam_em_table %>% 
+  subset(Day == "D2") -> fam_em_sep_D2
+
+fam_em_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_sep_D2
+
+ggplot(fam_em_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Family Embiotocidae Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem_D2
+
+famem_D2$data$Station <- factor(famem_D2$data$Station, levels=neworder_full)
+famem_D2
+
+```
+
+```{r Species 8 depth distribution in Day 3}
+
+fam_em_table %>% 
+  subset(Day == "D3") -> fam_em_sep_D3
+
+fam_em_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_sep_D3
+
+ggplot(fam_em_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Family Embiotocidae Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem_D3
+
+famem_D3$data$Station <- factor(famem_D3$data$Station, levels=neworder_full)
+famem_D3
+
+```
+
+Species 9 (*Atherinops affinis*)
+
+```{r Species 9}
+
+#Atherinops affinis (pelagic-neritic)
+
+AthAf<- sort_species2[9]
+GoodAthAf = names(AthAf)
+BadAthAf <- setdiff(taxa_names(physeq_obj_sub), GoodAthAf)
+Ath_Af <- prune_taxa(GoodAthAf, physeq_obj_sub)
+taxa_names(Ath_Af)
+
+vegan_otu(Ath_Af) -> ath_af_table
+
+ath_af_table <- as.data.frame(ath_af_table)
+
+```
+
+```{r Species 9 day:depth}
+
+ath_af_table %>%
+  rename(Species = colnames(ath_af_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ath_af_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ath_af_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ath_af_table)) -> aov_athaf
+
+p.adjust(aov_athaf$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 9 depth distribution}
+
+ath_af_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_depth
+
+ath_af_depth %>% 
+  subset(Station != "SHR") -> ath_af_depth
+
+ggplot(ath_af_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Atherinops affinis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> athaf
+
+#Reorder stations
+athaf$data$Station <- factor(athaf$data$Station, levels=neworder)
+athaf
+
+```
+
+```{r Species 9 day distribution}
+
+ath_af_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_day
+
+ggplot(ath_af_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Atherinops affinis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 9 depth distribution in Day 1}
+
+ath_af_table %>% 
+  subset(Day == "D1") -> ath_af_sep_D1
+
+ath_af_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_sep_D1
+
+ggplot(ath_af_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Atherinops affinis Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> athaf_D1
+
+athaf_D1$data$Station <- factor(athaf_D1$data$Station, levels=neworder_full)
+athaf_D1
+
+```
+
+```{r Species 9 depth distribution in Day 2}
+
+ath_af_table %>% 
+  subset(Day == "D2") -> ath_af_sep_D2
+
+ath_af_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_sep_D2
+
+ggplot(ath_af_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Atherinops affinis Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> athaf_D2
+
+athaf_D2$data$Station <- factor(athaf_D2$data$Station, levels=neworder_full)
+athaf_D2
+
+```
+
+```{r Species 9 depth distribution in Day 3}
+
+ath_af_table %>% 
+  subset(Day == "D3") -> ath_af_sep_D3
+
+ath_af_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_sep_D3
+
+ggplot(ath_af_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Atherinops affinis Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> athaf_D3
+
+athaf_D3$data$Station <- factor(athaf_D3$data$Station, levels=neworder_full)
+athaf_D3
+
+```
+
+Species 10 (*Seriphus politus*)
+
+```{r Species 10}
+
+#Seriphus politus (demersal)
+
+SerPo<- sort_species2[10]
+GoodSerPo = names(SerPo)
+BadSerPo <- setdiff(taxa_names(physeq_obj_sub), GoodSerPo)
+Ser_Po <- prune_taxa(GoodSerPo, physeq_obj_sub)
+taxa_names(Ser_Po)
+
+vegan_otu(Ser_Po) -> ser_po_table
+
+ser_po_table <- as.data.frame(ser_po_table)
+
+```
+
+```{r Species 10 day:depth}
+
+ser_po_table %>%
+  rename(Species = colnames(ser_po_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ser_po_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ser_po_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ser_po_table)) -> aov_serpo
+
+p.adjust(aov_serpo$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 10 depth distribution}
+
+ser_po_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_depth
+
+ser_po_depth %>% 
+  subset(Station != "SHR") -> ser_po_depth
+
+ggplot(ser_po_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Seriphus politus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo
+
+#Reorder stations
+serpo$data$Station <- factor(serpo$data$Station, levels=neworder)
+serpo
+
+```
+
+```{r Species 10 day distribution}
+
+ser_po_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_day
+
+ggplot(ser_po_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Seriphus politus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 10 depth distribution in Day 1}
+
+ser_po_table %>% 
+  subset(Day == "D1") -> ser_po_sep_D1
+
+ser_po_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_sep_D1
+
+ggplot(ser_po_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Seriphus politus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo_D1
+
+serpo_D1$data$Station <- factor(serpo_D1$data$Station, levels=neworder_full)
+serpo_D1
+
+```
+
+```{r Species 10 depth distribution in Day 2}
+
+ser_po_table %>% 
+  subset(Day == "D2") -> ser_po_sep_D2
+
+ser_po_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_sep_D2
+
+ggplot(ser_po_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Seriphus politus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo_D2
+
+serpo_D2$data$Station <- factor(serpo_D2$data$Station, levels=neworder_full)
+serpo_D2
+
+```
+
+```{r Species 10 depth distribution in Day 3}
+
+ser_po_table %>% 
+  subset(Day == "D3") -> ser_po_sep_D3
+
+ser_po_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_sep_D3
+
+ggplot(ser_po_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Seriphus politus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo_D3
+
+serpo_D3$data$Station <- factor(serpo_D3$data$Station, levels=neworder_full)
+serpo_D3
+
+```
+
+Species 11 (*Leuresthes tenuis*)
+
+```{r Species 11}
+
+#Leuresthes tenuis (pelagic-neritic)
+
+LeuTe<- sort_species2[11]
+GoodLeuTe = names(LeuTe)
+BadLeuTe <- setdiff(taxa_names(physeq_obj_sub), GoodLeuTe)
+Leu_Te <- prune_taxa(GoodLeuTe, physeq_obj_sub)
+taxa_names(Leu_Te)
+
+vegan_otu(Leu_Te) -> leu_te_table
+
+leu_te_table <- as.data.frame(leu_te_table)
+
+```
+
+```{r Species 11 day:depth}
+
+leu_te_table %>%
+  rename(Species = colnames(leu_te_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> leu_te_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = leu_te_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = leu_te_table)) -> aov_leute
+
+p.adjust(aov_leute$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 11 depth distribution}
+
+leu_te_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_depth
+
+leu_te_depth %>% 
+  subset(Station != "SHR") -> leu_te_depth
+
+ggplot(leu_te_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Leuresthes tenuis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> leute
+
+#Reorder stations
+leute$data$Station <- factor(leute$data$Station, levels=neworder)
+leute
+
+```
+
+```{r Species 11 day distribution}
+
+leu_te_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_day
+
+ggplot(leu_te_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Leuresthes tenuis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 11 depth distribution in Day 1}
+
+leu_te_table %>% 
+  subset(Day == "D1") -> leu_te_sep_D1
+
+leu_te_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_sep_D1
+
+ggplot(leu_te_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Leuresthes tenuis Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> leute_D1
+
+leute_D1$data$Station <- factor(leute_D1$data$Station, levels=neworder_full)
+leute_D1
+
+```
+
+```{r Species 11 depth distribution in Day 2}
+
+leu_te_table %>% 
+  subset(Day == "D2") -> leu_te_sep_D2
+
+leu_te_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_sep_D2
+
+ggplot(leu_te_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Leuresthes tenuis Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> leute_D2
+
+leute_D2$data$Station <- factor(leute_D2$data$Station, levels=neworder_full)
+leute_D2
+
+```
+
+```{r Species 11 depth distribution in Day 3}
+
+leu_te_table %>% 
+  subset(Day == "D3") -> leu_te_sep_D3
+
+leu_te_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_sep_D3
+
+ggplot(leu_te_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Leuresthes tenuis Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> leute_D3
+
+leute_D3$data$Station <- factor(leute_D3$data$Station, levels=neworder_full)
+leute_D3
+
+```
+
+Species 12 (Genus *Gibbonsia*)
+
+```{r Species 12}
+
+#Gibbonsia genus (demersal)
+
+GibGe<- sort_species2[12]
+GoodGibGe = names(GibGe)
+BadGibGe <- setdiff(taxa_names(physeq_obj_sub), GoodGibGe)
+Gib_Ge <- prune_taxa(GoodGibGe, physeq_obj_sub)
+taxa_names(Gib_Ge)
+
+vegan_otu(Gib_Ge) -> gib_ge_table
+
+gib_ge_table <- as.data.frame(gib_ge_table)
+
+```
+
+```{r Species 12 day:depth}
+
+gib_ge_table %>%
+  rename(Species = colnames(gib_ge_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> gib_ge_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gib_ge_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gib_ge_table)) -> aov_gibge
+
+p.adjust(aov_gibge$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r Species 12 depth distribution}
+
+gib_ge_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_depth
+
+gib_ge_depth %>% 
+  subset(Station != "SHR") -> gib_ge_depth
+
+ggplot(gib_ge_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Gibbonsia spp.") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> gibge
+
+#Reorder stations
+gibge$data$Station <- factor(gibge$data$Station, levels=neworder)
+gibge
+
+```
+
+```{r Species 12 day distribution}
+
+gib_ge_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_day
+
+ggplot(gib_ge_day, aes(x = Day, y = mean)) + 
+  geom_col(aes(fill = Day)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:4]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Day") +
+  ggtitle("Genus Gibbonsia") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2))
+
+```
+
+```{r Species 12 depth distribution in Day 1}
+
+gib_ge_table %>% 
+  subset(Day == "D1") -> gib_ge_sep_D1
+
+gib_ge_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_sep_D1
+
+ggplot(gib_ge_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Gibbonsia spp. Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> gibge_D1
+
+gibge_D1$data$Station <- factor(gibge_D1$data$Station, levels=neworder_full)
+gibge_D1
+
+```
+
+```{r Species 12 depth distribution in Day 2}
+
+gib_ge_table %>% 
+  subset(Day == "D2") -> gib_ge_sep_D2
+
+gib_ge_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_sep_D2
+
+ggplot(gib_ge_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Gibbonsia spp. Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> gibge_D2
+
+gibge_D2$data$Station <- factor(gibge_D2$data$Station, levels=neworder_full)
+gibge_D2
+
+```
+
+```{r Species 12 depth distribution in Day 3}
+
+gib_ge_table %>% 
+  subset(Day == "D3") -> gib_ge_sep_D3
+
+gib_ge_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_sep_D3
+
+ggplot(gib_ge_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Gibbonsia spp. Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> gibge_D3
+
+gibge_D3$data$Station <- factor(gibge_D3$data$Station, levels=neworder_full)
+gibge_D3
+
+```
+We also want to assess the depth distribution patterns for the remaining 10 core taxa. 
+
+*Embiotica jacksoni*
+
+```{r Embiotoca jacksoni}
+#Embiotoca jacksoni
+
+EmbJa <- sort_species2[13]
+GoodEmbJa = names(EmbJa)
+BadEmbJa <- setdiff(taxa_names(physeq_obj_sub), GoodEmbJa)
+Emb_Ja <- prune_taxa(GoodEmbJa, physeq_obj_sub)
+taxa_names(Emb_Ja)
+
+vegan_otu(Emb_Ja) -> emb_ja_table
+emb_ja_table <- as.data.frame(emb_ja_table)
+
+```
+
+```{r embja day:depth}
+library(car)
+
+emb_ja_table %>%
+  rename(Species = colnames(emb_ja_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> emb_ja_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = emb_ja_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = emb_ja_table)) -> aov_embja
+
+p.adjust(aov_embja$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r embja depth distribution}
+
+emb_ja_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> emb_ja_depth
+
+
+emb_ja_depth %>% 
+  subset(Station != "SHR") -> emb_ja_depth
+
+
+
+ggplot(emb_ja_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Embiotoca jacksoni") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> embja
+
+embja$data$Station <- factor(embja$data$Station, levels=neworder)
+embja
+
+```
+
+```{r embja depth distribution in Day 1}
+
+emb_ja_table %>% 
+  subset(Day == "D1") -> emb_ja_sep_D1
+
+emb_ja_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> emb_ja_sep_D1
+
+ggplot(emb_ja_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Embiotoca jacksoni Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> embja_D1
+
+
+embja_D1$data$Station <- factor(embja_D1$data$Station, levels=neworder_full)
+embja_D1
+
+```
+
+```{r embja depth distribution in Day 2}
+
+emb_ja_table %>% 
+  subset(Day == "D2") -> emb_ja_sep_D2
+
+emb_ja_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> emb_ja_sep_D2
+
+ggplot(emb_ja_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Embiotoca jacksoni Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> embja_D2
+
+embja_D2$data$Station <- factor(embja_D2$data$Station, levels=neworder_full)
+embja_D2
+
+```
+
+```{r embja depth distribution in Day 3}
+
+emb_ja_table %>% 
+  subset(Day == "D3") -> emb_ja_sep_D3
+
+emb_ja_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> emb_ja_sep_D3
+
+ggplot(emb_ja_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Embiotoca jacksoni Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> embja_D3
+
+embja_D3$data$Station <- factor(embja_D3$data$Station, levels=neworder_full)
+embja_D3
+
+```
+
+*Rimicola muscarum*
+
+```{r Rimicola muscarum}
+#Rimicola muscarum
+
+RimMu <- sort_species2[14]
+GoodRimMu = names(RimMu)
+BadRimMu <- setdiff(taxa_names(physeq_obj_sub), GoodRimMu)
+Rim_Mu <- prune_taxa(GoodRimMu, physeq_obj_sub)
+taxa_names(Rim_Mu)
+
+vegan_otu(Rim_Mu) -> rim_mu_table
+rim_mu_table <- as.data.frame(rim_mu_table)
+
+```
+
+```{r rimmu day:depth}
+
+rim_mu_table %>%
+  rename(Species = colnames(rim_mu_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> rim_mu_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = rim_mu_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = rim_mu_table)) -> aov_rimmu
+
+p.adjust(aov_rimmu$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r rimmu depth distribution}
+
+rim_mu_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rim_mu_depth
+
+
+rim_mu_depth %>% 
+  subset(Station != "SHR") -> rim_mu_depth
+
+
+ggplot(rim_mu_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Rimicola muscarum") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> rimmu
+
+rimmu$data$Station <- factor(rimmu$data$Station, levels=neworder)
+rimmu
+
+```
+
+```{r rimmu depth distribution in Day 1}
+
+rim_mu_table %>% 
+  subset(Day == "D1") -> rim_mu_sep_D1
+
+rim_mu_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rim_mu_sep_D1
+
+ggplot(rim_mu_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Rimicola muscarum Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> rimmu_D1
+
+
+rimmu_D1$data$Station <- factor(rimmu_D1$data$Station, levels=neworder_full)
+rimmu_D1
+
+```
+
+```{r rimmu depth distribution in Day 2}
+
+rim_mu_table %>% 
+  subset(Day == "D2") -> rim_mu_sep_D2
+
+rim_mu_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rim_mu_sep_D2
+
+ggplot(rim_mu_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Rimicola muscarum Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> rimmu_D2
+
+rimmu_D2$data$Station <- factor(rimmu_D2$data$Station, levels=neworder_full)
+rimmu_D2
+
+```
+
+```{r rimmu depth distribution in Day 3}
+
+rim_mu_table %>% 
+  subset(Day == "D3") -> rim_mu_sep_D3
+
+rim_mu_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rim_mu_sep_D3
+
+ggplot(rim_mu_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Rimicola muscarum Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> rimmu_D3
+
+rimmu_D3$data$Station <- factor(rimmu_D3$data$Station, levels=neworder_full)
+rimmu_D3
+
+```
+
+*Girella nigricans*
+
+```{r Girella nigricans}
+#Girella nigricans
+
+GirNi <- sort_species2[15]
+GoodGirNi = names(GirNi)
+BadGirNi <- setdiff(taxa_names(physeq_obj_sub), GoodGirNi)
+Gir_Ni <- prune_taxa(GoodGirNi, physeq_obj_sub)
+taxa_names(Gir_Ni)
+
+vegan_otu(Gir_Ni) -> gir_ni_table
+gir_ni_table <- as.data.frame(gir_ni_table)
+
+```
+
+```{r girni depth:day}
+
+gir_ni_table %>%
+  rename(Species = colnames(gir_ni_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> gir_ni_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gir_ni_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gir_ni_table)) -> aov_girni
+
+p.adjust(aov_girni$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r girni depth distribution}
+
+gir_ni_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gir_ni_depth
+
+
+gir_ni_depth %>% 
+  subset(Station != "SHR") -> gir_ni_depth
+
+
+ggplot(gir_ni_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Girella nigricans") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> girni
+
+girni$data$Station <- factor(girni$data$Station, levels=neworder)
+girni
+
+```
+
+
+```{r girni depth distribution in Day 1}
+
+gir_ni_table %>% 
+  subset(Day == "D1") -> gir_ni_sep_D1
+
+gir_ni_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gir_ni_sep_D1
+
+ggplot(gir_ni_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Girella nigricans Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> girni_D1
+
+
+girni_D1$data$Station <- factor(girni_D1$data$Station, levels=neworder_full)
+girni_D1
+
+```
+
+```{r girni depth distribution in Day 2}
+
+gir_ni_table %>% 
+  subset(Day == "D2") -> gir_ni_sep_D2
+
+gir_ni_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gir_ni_sep_D2
+
+ggplot(gir_ni_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Girella nigricans Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> girni_D2
+
+girni_D2$data$Station <- factor(girni_D2$data$Station, levels=neworder_full)
+girni_D2
+
+```
+
+```{r girni depth distribution in Day 3}
+
+gir_ni_table %>% 
+  subset(Day == "D3") -> gir_ni_sep_D3
+
+gir_ni_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gir_ni_sep_D3
+
+ggplot(gir_ni_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Girella nigricans Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> girni_D3
+
+girni_D3$data$Station <- factor(girni_D3$data$Station, levels=neworder_full)
+girni_D3
+
+```
+
+*Brachyistius frenatus*
+
+```{r Brachyistius frenatus}
+
+#Chordata;Actinopteri;;Embiotocidae;Brachyistius;Brachyistius frenatus
+#Brachyistius frenatus
+
+GoodBraFr = "Chordata;Actinopteri;;Embiotocidae;Brachyistius;Brachyistius frenatus"
+BadBraFr <- setdiff(taxa_names(physeq_obj_sub), GoodBraFr)
+Bra_Fr <- prune_taxa(GoodBraFr, physeq_obj_sub)
+taxa_names(Bra_Fr)
+
+
+#####
+vegan_otu(Bra_Fr) -> bra_fr_table
+bra_fr_table<- as.data.frame(bra_fr_table)
+
+```
+
+```{r brafr depth:day}
+
+bra_fr_table %>%
+  rename(Species = colnames(bra_fr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> bra_fr_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = bra_fr_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = bra_fr_table)) -> aov_brafr
+
+p.adjust(aov_brafr$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r brafr depth distribution}
+
+bra_fr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> bra_fr_depth
+
+
+bra_fr_depth %>% 
+  subset(Station != "SHR") -> bra_fr_depth
+
+
+ggplot(bra_fr_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Brachyistius frenatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> brafr
+
+brafr$data$Station <- factor(brafr$data$Station, levels=neworder)
+brafr
+
+```
+
+
+```{r brafr depth distribution in Day 1}
+
+bra_fr_table %>% 
+  subset(Day == "D1") -> bra_fr_sep_D1
+
+bra_fr_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> bra_fr_sep_D1
+
+ggplot(bra_fr_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Brachyistius frenatus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> brafr_D1
+
+
+brafr_D1$data$Station <- factor(brafr_D1$data$Station, levels=neworder_full)
+brafr_D1
+
+```
+
+```{r brafr depth distribution in Day 2}
+
+bra_fr_table %>% 
+  subset(Day == "D2") -> bra_fr_sep_D2
+
+bra_fr_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> bra_fr_sep_D2
+
+ggplot(bra_fr_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Brachyistius frenatus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> brafr_D2
+
+brafr_D2$data$Station <- factor(brafr_D2$data$Station, levels=neworder_full)
+brafr_D2
+
+```
+
+```{r brafr depth distribution in Day 3}
+
+bra_fr_table %>% 
+  subset(Day == "D3") -> bra_fr_sep_D3
+
+bra_fr_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> bra_fr_sep_D3
+
+ggplot(bra_fr_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Brachyistius frenatus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> brafr_D3
+
+brafr_D3$data$Station <- factor(brafr_D3$data$Station, levels=neworder_full)
+brafr_D3
+
+```
+
+*Heterostichus rostratus*
+
+```{r Heterostichus rostratus}
+
+#Chordata;Actinopteri;Blenniiformes;Clinidae;Heterostichus;Heterostichus rostratus
+#Heterostichus rostratus
+
+GoodHetRo = "Chordata;Actinopteri;Blenniiformes;Clinidae;Heterostichus;Heterostichus rostratus"
+BadHetRo <- setdiff(taxa_names(physeq_obj_sub), GoodHetRo)
+Het_Ro <- prune_taxa(GoodHetRo, physeq_obj_sub)
+taxa_names(Het_Ro)
+
+vegan_otu(Het_Ro) -> het_ro_table
+het_ro_table <- as.data.frame(het_ro_table)
+
+```
+
+```{r hetro depth:day}
+
+het_ro_table %>%
+  rename(Species = colnames(het_ro_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> het_ro_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = het_ro_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = het_ro_table)) -> aov_hetro
+
+p.adjust(aov_hetro$`Pr(>F)`, method = "bonferroni")
+
+```
+
+
+```{r hetro depth distribution}
+
+het_ro_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> het_ro_depth
+
+
+het_ro_depth %>% 
+  subset(Station != "SHR") -> het_ro_depth
+
+
+ggplot(het_ro_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Heterostichus rostratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> hetro
+
+hetro$data$Station <- factor(hetro$data$Station, levels=neworder)
+hetro
+
+```
+
+
+```{r hetro depth distribution in Day 1}
+
+het_ro_table %>% 
+  subset(Day == "D1") -> het_ro_sep_D1
+
+het_ro_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> het_ro_sep_D1
+
+ggplot(het_ro_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Heterostichus rostratus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> hetro_D1
+
+
+hetro_D1$data$Station <- factor(hetro_D1$data$Station, levels=neworder_full)
+hetro_D1
+
+```
+
+```{r hetro depth distribution in Day 2}
+
+het_ro_table %>% 
+  subset(Day == "D2") -> het_ro_sep_D2
+
+het_ro_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> het_ro_sep_D2
+
+ggplot(het_ro_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Heterostichus rostratus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> hetro_D2
+
+hetro_D2$data$Station <- factor(hetro_D2$data$Station, levels=neworder_full)
+hetro_D2
+
+```
+
+```{r hetro depth distribution in Day 3}
+
+het_ro_table %>% 
+  subset(Day == "D3") -> het_ro_sep_D3
+
+het_ro_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> het_ro_sep_D3
+
+ggplot(het_ro_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Heterostichus rostratus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> hetro_D3
+
+hetro_D3$data$Station <- factor(hetro_D3$data$Station, levels=neworder_full)
+hetro_D3
+
+```
+
+*Anisotremus davidsonii*
+
+```{r Anisotremus davidsonii}
+
+#Chordata;Actinopteri;Lutjaniformes;Haemulidae;Anisotremus;Anisotremus davidsonii
+#Anisotremus davidsonii
+
+GoodAniDa = "Chordata;Actinopteri;Lutjaniformes;Haemulidae;Anisotremus;Anisotremus davidsonii"
+BadAniDa <- setdiff(taxa_names(physeq_obj_sub), GoodAniDa)
+Ani_Da <- prune_taxa(GoodAniDa, physeq_obj_sub)
+taxa_names(Ani_Da)
+
+vegan_otu(Ani_Da) -> ani_da_table
+ani_da_table <- as.data.frame(ani_da_table)
+
+```
+
+```{r anida day:depth}
+
+ani_da_table %>%
+  rename(Species = colnames(ani_da_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ani_da_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ani_da_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ani_da_table)) -> aov_anida
+
+p.adjust(aov_anida$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r anida depth distribution}
+
+ani_da_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ani_da_depth
+
+
+ani_da_depth %>% 
+  subset(Station != "SHR") -> ani_da_depth
+
+
+ggplot(ani_da_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Anisotremus davidsonii") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> anida
+
+anida$data$Station <- factor(anida$data$Station, levels=neworder)
+anida
+
+```
+
+```{r anida depth distribution in Day 1}
+
+ani_da_table %>% 
+  subset(Day == "D1") -> ani_da_sep_D1
+
+ani_da_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ani_da_sep_D1
+
+ggplot(ani_da_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Anisotremus davidsonii Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> anida_D1
+
+
+anida_D1$data$Station <- factor(anida_D1$data$Station, levels=neworder_full)
+anida_D1
+
+```
+
+```{r anida depth distribution in Day 2}
+
+ani_da_table %>% 
+  subset(Day == "D2") -> ani_da_sep_D2
+
+ani_da_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ani_da_sep_D2
+
+ggplot(ani_da_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Anisotremus davidsonii Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> anida_D2
+
+anida_D2$data$Station <- factor(anida_D2$data$Station, levels=neworder_full)
+anida_D2
+
+```
+
+```{r anida depth distribution in Day 3}
+
+ani_da_table %>% 
+  subset(Day == "D3") -> ani_da_sep_D3
+
+ani_da_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ani_da_sep_D3
+
+ggplot(ani_da_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Anisotremus davidsonii Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> anida_D3
+
+anida_D3$data$Station <- factor(anida_D3$data$Station, levels=neworder_full)
+anida_D3
+
+```
+
+*Scomber japonicus*
+
+```{r Scomber japonicus}
+
+#Chordata;Actinopteri;Scombriformes;Scombridae;Scomber;Scomber japonicus
+#Scomber japonicus
+
+GoodScoJa = "Chordata;Actinopteri;Scombriformes;Scombridae;Scomber;Scomber japonicus"
+BadScoJa <- setdiff(taxa_names(physeq_obj_sub), GoodScoJa)
+Sco_Ja <- prune_taxa(GoodScoJa, physeq_obj_sub)
+taxa_names(Sco_Ja)
+
+vegan_otu(Sco_Ja) -> sco_ja_table
+sco_ja_table <- as.data.frame(sco_ja_table)
+
+```
+
+```{r scoja depth:day}
+
+sco_ja_table %>%
+  rename(Species = colnames(sco_ja_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sco_ja_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sco_ja_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sco_ja_table)) -> aov_scoja
+
+p.adjust(aov_scoja$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r scoja depth distribution}
+
+sco_ja_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_ja_depth
+
+
+sco_ja_depth %>% 
+  subset(Station != "SHR") -> sco_ja_depth
+
+ggplot(sco_ja_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Scomber japonicus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> scoja
+
+scoja$data$Station <- factor(scoja$data$Station, levels=neworder)
+scoja
+
+```
+
+```{r scoja depth distribution in Day 1}
+
+sco_ja_table %>% 
+  subset(Day == "D1") -> sco_ja_sep_D1
+
+sco_ja_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_ja_sep_D1
+
+ggplot(sco_ja_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Scomber japonicus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> scoja_D1
+
+
+scoja_D1$data$Station <- factor(scoja_D1$data$Station, levels=neworder_full)
+scoja_D1
+
+```
+
+```{r scoja depth distribution in Day 2}
+
+sco_ja_table %>% 
+  subset(Day == "D2") -> sco_ja_sep_D2
+
+sco_ja_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_ja_sep_D2
+
+ggplot(sco_ja_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Scomber japonicus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> scoja_D2
+
+scoja_D2$data$Station <- factor(scoja_D2$data$Station, levels=neworder_full)
+scoja_D2
+
+```
+
+```{r scoja depth distribution in Day 3}
+
+sco_ja_table %>% 
+  subset(Day == "D3") -> sco_ja_sep_D3
+
+sco_ja_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_ja_sep_D3
+
+ggplot(sco_ja_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Scomber japonicus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> scoja_D3
+
+scoja_D3$data$Station <- factor(scoja_D3$data$Station, levels=neworder_full)
+scoja_D3
+
+```
+
+*Myliobatis californica*
+
+```{r Myliobatis californica}
+
+#Chordata;Chondrichthyes;Myliobatiformes;Myliobatidae;Myliobatis;Myliobatis californica
+#Myliobatis californica
+
+GoodMylCa = "Chordata;Chondrichthyes;Myliobatiformes;Myliobatidae;Myliobatis;Myliobatis californica"
+BadMylCa <- setdiff(taxa_names(physeq_obj_sub), GoodMylCa)
+Myl_Ca <- prune_taxa(GoodMylCa, physeq_obj_sub)
+taxa_names(Myl_Ca)
+
+vegan_otu(Myl_Ca) -> myl_ca_table
+myl_ca_table <- as.data.frame(myl_ca_table)
+
+```
+
+```{r mylca depth:day}
+
+myl_ca_table %>%
+  rename(Species = colnames(myl_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> myl_ca_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = myl_ca_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = myl_ca_table)) -> aov_mylca
+
+p.adjust(aov_mylca$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r mylca depth distribution}
+
+myl_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> myl_ca_depth
+
+
+myl_ca_depth %>% 
+  subset(Station != "SHR") -> myl_ca_depth
+
+
+ggplot(myl_ca_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Myliobatis californica") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> mylca
+
+mylca$data$Station <- factor(mylca$data$Station, levels=neworder)
+mylca
+
+```
+
+```{r mylca depth distribution in Day 1}
+
+myl_ca_table %>% 
+  subset(Day == "D1") -> myl_ca_sep_D1
+
+myl_ca_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> myl_ca_sep_D1
+
+ggplot(myl_ca_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Myliobatis californica Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> mylca_D1
+
+
+mylca_D1$data$Station <- factor(mylca_D1$data$Station, levels=neworder_full)
+mylca_D1
+
+```
+
+```{r mylca depth distribution in Day 2}
+
+myl_ca_table %>% 
+  subset(Day == "D2") -> myl_ca_sep_D2
+
+myl_ca_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> myl_ca_sep_D2
+
+ggplot(myl_ca_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Myliobatis californica Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> mylca_D2
+
+mylca_D2$data$Station <- factor(mylca_D2$data$Station, levels=neworder_full)
+mylca_D2
+
+```
+
+```{r mylca depth distribution in Day 3}
+
+myl_ca_table %>% 
+  subset(Day == "D3") -> myl_ca_sep_D3
+
+myl_ca_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> myl_ca_sep_D3
+
+ggplot(myl_ca_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Myliobatis californica Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> mylca_D3
+
+mylca_D3$data$Station <- factor(mylca_D3$data$Station, levels=neworder_full)
+mylca_D3
+
+```
+
+*Zalophus californianus*
+
+```{r Zalophus californianus}
+
+#Chordata;Mammalia;Carnivora;Otariidae;Zalophus;Zalophus californianus
+#Zalophus californianus
+
+GoodZalCa = "Chordata;Mammalia;Carnivora;Otariidae;Zalophus;Zalophus californianus"
+BadZalCa <- setdiff(taxa_names(physeq_obj_sub), GoodZalCa)
+Zal_Ca <- prune_taxa(GoodZalCa, physeq_obj_sub)
+taxa_names(Zal_Ca)
+
+vegan_otu(Zal_Ca) -> zal_ca_table
+zal_ca_table <- as.data.frame(zal_ca_table)
+
+```
+
+```{r zalca depth:day}
+
+zal_ca_table %>%
+  rename(Species = colnames(zal_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> zal_ca_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = zal_ca_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = zal_ca_table)) -> aov_zalca
+
+p.adjust(aov_zalca$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r zalca depth distribution}
+
+zal_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> zal_ca_depth
+
+zal_ca_depth %>% 
+  subset(Station != "SHR") -> zal_ca_depth
+
+
+ggplot(zal_ca_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Zalophus californianus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> zalca
+
+
+zalca$data$Station <- factor(zalca$data$Station, levels=neworder)
+zalca
+
+```
+
+```{r zalca depth distribution in Day 1}
+
+zal_ca_table %>% 
+  subset(Day == "D1") -> zal_ca_sep_D1
+
+zal_ca_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> zal_ca_sep_D1
+
+ggplot(zal_ca_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Zalophus californianus Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> zalca_D1
+
+
+zalca_D1$data$Station <- factor(zalca_D1$data$Station, levels=neworder_full)
+zalca_D1
+
+```
+
+```{r zalca depth distribution in Day 2}
+
+zal_ca_table %>% 
+  subset(Day == "D2") -> zal_ca_sep_D2
+
+zal_ca_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> zal_ca_sep_D2
+
+ggplot(zal_ca_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Zalophus californianus Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> zalca_D2
+
+zalca_D2$data$Station <- factor(zalca_D2$data$Station, levels=neworder_full)
+zalca_D2
+
+```
+
+```{r zalca depth distribution in Day 3}
+
+zal_ca_table %>% 
+  subset(Day == "D3") -> zal_ca_sep_D3
+
+zal_ca_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> zal_ca_sep_D3
+
+ggplot(zal_ca_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Zalophus californianus Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> zalca_D3
+
+zalca_D3$data$Station <- factor(zalca_D3$data$Station, levels=neworder_full)
+zalca_D3
+
+```
+
+*Hermosilla azurea*
+
+```{r Hermosilla azurea}
+#Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Hermosilla;Hermosilla azurea
+#Hermosilla azurea
+
+GoodHerAz = "Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Hermosilla;Hermosilla azurea"
+BadHerAz <- setdiff(taxa_names(physeq_obj_sub), GoodHerAz)
+Her_Az <- prune_taxa(GoodHerAz, physeq_obj_sub)
+taxa_names(Her_Az)
+
+vegan_otu(Her_Az) -> her_az_table
+her_az_table <- as.data.frame(her_az_table)
+
+```
+
+```{r heraz depth:day}
+
+her_az_table %>%
+  rename(Species = colnames(her_az_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> her_az_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = her_az_table))
+
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = her_az_table)) -> aov_heraz
+
+p.adjust(aov_heraz$`Pr(>F)`, method = "bonferroni")
+
+```
+
+```{r heraz depth distribution}
+
+her_az_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_depth
+
+
+her_az_depth%>% 
+  subset(Station != "SHR") -> her_az_depth
+
+
+ggplot(her_az_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=20, face = "italic"),
+        axis.text = element_text(size=12.5)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Hermosilla azurea") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz
+
+heraz$data$Station <- factor(heraz$data$Station, levels=neworder)
+heraz
+
+```
+
+
+```{r heraz depth distribution in Day 1}
+
+her_az_table %>% 
+  subset(Day == "D1") -> her_az_sep_D1
+
+her_az_sep_D1 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_sep_D1
+
+ggplot(her_az_sep_D1, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Hermosilla azurea Day 1") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz_D1
+
+heraz_D1$data$Station <- factor(heraz_D1$data$Station, levels=neworder_full)
+heraz_D1
+
+```
+
+```{r heraz depth distribution in Day 2}
+
+her_az_table %>% 
+  subset(Day == "D2") -> her_az_sep_D2
+
+her_az_sep_D2 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_sep_D2
+
+ggplot(her_az_sep_D2, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Hermosilla azurea Day 2") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz_D2
+
+heraz_D2$data$Station <- factor(heraz_D2$data$Station, levels=neworder_full)
+heraz_D2
+
+```
+
+```{r heraz depth distribution in Day 3}
+
+her_az_table %>% 
+  subset(Day == "D3") -> her_az_sep_D3
+
+her_az_sep_D3 %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_sep_D3
+
+ggplot(her_az_sep_D3, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,1.0)) + 
+  xlab("Station") +
+  ggtitle("Hermosilla azurea Day 3") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz_D3
+
+heraz_D3$data$Station <- factor(heraz_D3$data$Station, levels=neworder_full)
+heraz_D3
+
+```
+
+Alpha diversity analyses
+
+We will now run the alpha diversity analyses for the core taxa. First, we will create a phyloseq object of the core taxa eDNA read counts.
+
+```{r Create Phyloseq Object for counts of core taxa}
+
+
+hightaxa = c("Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Hermosilla;Hermosilla azurea", "Chordata;Mammalia;Carnivora;Otariidae;Zalophus;Zalophus californianus", "Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax nebulifer", "Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;Citharichthys stigmaeus", "Chordata;Actinopteri;Lutjaniformes;Haemulidae;Anisotremus;Anisotremus davidsonii", "Chordata;Actinopteri;;Sciaenidae;Umbrina;Umbrina roncador", "Chordata;Actinopteri;Blenniiformes;Gobiesocidae;Rimicola;Rimicola muscarum", "Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax clathratus", "Chordata;Actinopteri;;Sciaenidae;Menticirrhus;Menticirrhus undulatus", "Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Leuresthes;Leuresthes tenuis", "Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Girella;Girella nigricans", "Chordata;Actinopteri;;Sciaenidae;Seriphus;Seriphus politus", "Chordata;Actinopteri;Scombriformes;Scombridae;Scomber;Scomber japonicus", "Chordata;Chondrichthyes;Myliobatiformes;Myliobatidae;Myliobatis;Myliobatis californica", "Chordata;Actinopteri;;Embiotocidae;;", "Chordata;Actinopteri;;Embiotocidae;Embiotoca;Embiotoca jacksoni", "Chordata;Actinopteri;Clupeiformes;Engraulidae;Engraulis;Engraulis mordax", "Chordata;Actinopteri;Blenniiformes;Clinidae;Heterostichus;Heterostichus rostratus", "Chordata;Actinopteri;Blenniiformes;Clinidae;Gibbonsia;", "Chordata;Actinopteri;;Embiotocidae;Brachyistius;Brachyistius frenatus", "Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Atherinops;Atherinops affinis", 
+"Chordata;Actinopteri;Clupeiformes;Clupeidae;Sardinops;Sardinops sagax")
+
+physeq_obj_sub.counts <- prune_taxa(hightaxa, physeq_obj.counts)
+
+physeq_obj_sub.counts
+
+```
+
+Then we will run an ANOVA to assess species richness across depth.
+
+```{r, ANOVA Observed Taxa Between Depths for core taxa}
+
+#ANOVA between depths
+alpha.diversity <- estimate_richness(physeq_obj_sub.counts, measures = c("Observed"))
+data <- cbind(sample_data(physeq_obj_sub.counts), alpha.diversity)
+
+data %>% 
+  filter(Depth_m >= 0) -> data
+
+
+#Summary table of species across depths
+data %>% 
+  group_by(Location) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+
+#   mean      sum
+#0m	19.11111	172		
+#10m	20.70000	207		
+#1m	18.88889	170		
+#5m	21.11111	190		
+#9m	21.33333	192		
+
+
+model=lm(data$Observed ~ data$Location)
+ANOVA=aov(model)
+summary(ANOVA)
+
+```
+
+There is a significant difference in alpha diversity across depth stations (p=0.00748). We will now run post-hoc Tukey tests.
+
+```{r Tukey HSD test for core taxa}
+
+#Tukey HSD test
+data$Location <- as.factor(data$Location) #ensure that Depths are factors
+TUKEY <- TukeyHSD(x=ANOVA, 'data$Location', conf.level=0.95)
+TUKEY
+
+```
+
+Species richness at 1m is significantly lower than species richness at 9m. No other pairwise comparisons are significant. 
+
+```{r Observed Core Taxa Box Plot}
+
+#Observed Taxa Box Plot Across Depth
+#Function for determining signficant Groups from Tukey
+generate_label_df <- function(TUKEY, variable){
+  
+  # Extract labels and factor levels from Tukey post-hoc 
+  Tukey.levels <- TUKEY[[variable]][,4]
+  Tukey.labels <- data.frame(multcompLetters(Tukey.levels)['Letters'])
+  
+  #I need to put the labels in the same order as in the boxplot :
+  Tukey.labels$treatment=rownames(Tukey.labels)
+  Tukey.labels=Tukey.labels[order(Tukey.labels$treatment) , ]
+  return(Tukey.labels)
+}
+
+#Determine Groups of Samples
+labels<-generate_label_df(TUKEY, "data$Location") #generate labels of groups using function
+names(labels)<-c('Letters','Location') #rename columns for merging
+
+#Obtain letter position for y axis using means
+yvalue<-aggregate(Observed~Location, data=data, mean) 
+
+final<-merge(labels,yvalue) #merge dataframes
+
+
+t <- ggplot(data, aes(x = Location, y = Observed)) + 
+  geom_boxplot(fill = col.groups) +
+  geom_jitter(width = 0) + 
+  ylim(15,23) +
+  theme_bw() + theme_ranacapa() +theme(legend.position="none", axis.title = element_text(size = 20), axis.text = element_text(size = 15)) + 
+  geom_text(data = final, aes(x = Location, y = Observed, label = Letters), vjust=-12,hjust=1.25)+ ylab("Observed Species") + xlab("Depth Station")
+
+#Reoder boxplot in order of decreasing depth
+t$data$Location <- factor(t$data$Location, levels=neworder)
+t
+
+```
+
+We will now run an ANOVA to assess species richness across nearshore vs. surf zone stations using eDNA read counts from the shore and 1m stations.
+
+```{r t test of shore and 1m species richness}
+
+data %>% 
+  filter(Location == "SHR" | Location == "1m") -> shr_vs_1m_sub
+
+t.test(Observed ~ Location, data = shr_vs_1m_sub)
+
+```
+
+There is no difference in species richness between the shore and 1m stations.
+
+```{r, ANOVA Observed Taxa Across Days}
+
+#Summary table of species across days
+data %>% 
+  group_by(Collected_Date) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+
+#Day_1	19.83333	357	
+#Day_2	19.89474	378	
+#Day_3	20.72222	373	
+
+summary(aov(data$Observed ~ data$Collected_Date))
+
+```
+
+There is not a significant difference in species richness across sampling days. We will now see how many species are shared across all three depths.
+
+
+We will now run Gradientforest for common species across all stations (including shore). *Note: this reuses several variables from the previous gradientforest models (keep in mind)*
+
+```{r GradientForest Offshore, results="hide",warning=FALSE}
+
+#Remake Indexed OTU table
+ind_val <- as.data.frame(carnivore_rel_abun_withshore)
+
+#Make Numeric
+ind_val <- sapply(ind_val, as.numeric)
+
+#Re apply row and col names
+row.names(ind_val) <- row.names(carnivore_rel_abun_withshore)
+colnames(ind_val) <- colnames(carnivore_rel_abun_withshore)
+
+#Rename Column Names
+species_names <- colnames(carnivore_rel_abun_withshore)
+easy_name <- vector(length=length(species_names))
+
+for (i in 1:length(easy_name)) {
+  easy_name[i] <- paste0("species", i)
+}
+
+#Store Name Pairs
+species_list <- as.list(easy_name,species_names)
+names(species_names) <- easy_name
+
+
+input_meta_path3 <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_gradientForest_2.13.20.txt"
+metadata3 <- read.table(input_meta_path3, header = 1, sep = "\t", stringsAsFactors = F)
+metadata3 <- as.data.frame(metadata3)
+row_namers <- metadata3$Sample_name
+metadata3 <- sapply(metadata3, as.numeric)
+row.names(metadata3) <- row_namers
+metadata3 <- metadata3[,2:5]
+
+datDF_carn<-merge(metadata3,ind_val,by="row.names")
+g <- length(datDF_carn)
+row_namers2 <- row.names(ind_val)
+datDF_carn <- sapply(datDF_carn, as.numeric)
+datDF_carn <- datDF_carn[,2:g]
+datDF_carn <- as.data.frame(datDF_carn)
+row.names(datDF_carn) <- row_namers2 
+
+
+###########################################
+# GRADIENT FOREST  (common species)       #
+###########################################
+
+eDNA_gradFor3<-gradientForest(datDF_carn,
+                             predictor.vars = colnames(metadata3), 
+                             response.vars = colnames(ind_val),
+                             ntree = 500, transform = NULL, compact = F,
+                             corr.threshold = 0.5, trace=T)
+
+```
+
+After creating the model, we will plot the overall importance of the environmental variables and the performance of each species. 
+
+```{r Overall Importance of Environmental Variables}
+
+#Plot Overall Importance of Environmental Variables
+importance(eDNA_gradFor3)
+
+plot(eDNA_gradFor3,plot.type="Overall.Importance", col = c(col_mpa), cex.axis = 0.8)
+
+```
+The overall importance of the variables are as follows: R2 weighted importance is Depth_m (0.20509139), Off_On (0.10963029),  Collected_Date (0.08094993), Replicate (0.00000000). Accuracy importance is Depth_m (0.01848839), Off_On (0.01108701), Collected_Date (0.008089643), Replicate (-0.003250456). 
+<br />
+
+We will then assess the species performances in the gradientForest model. 
+
+```{r Species performances}
+
+#R^2 fit for each species
+plot(eDNA_gradFor3, plot.type = "Performance", show.names = F, horizontal = F,
+     cex.axis = 1, cex.labels = 0.7, line = 2.5)
+
+```
+
+```{r Sort species by performance}
+
+sort(eDNA_gradFor3$result, decreasing=T) -> sort_species3
+sort_species3
+
+```
+
+There are 8 species above 0.40 species perfomance. Their distributions are plotted below. 
+
+Species 1 (*Menticirrhus undulatus*)
+
+```{r Species 1}
+#Menticirrhus undulatus
+
+men_un_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_depth_withshore
+
+
+ggplot(men_un_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Menticirrhus undulatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun_withshore
+
+#Reorder stations
+menun_withshore$data$Station <- factor(menun_withshore$data$Station, levels=neworder_full)
+menun_withshore
+
+```
+
+Species 2 (Family Embiotocidae)
+
+```{r Species 2}
+
+#Family Embiotocidae
+
+fam_em_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_depth_withshore
+
+ggplot(fam_em_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Family Embiotocidae") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem_withshore
+
+#Reorder stations
+famem_withshore$data$Station <- factor(famem_withshore$data$Station, levels=neworder_full)
+famem_withshore
+
+```
+
+Species 3 (*Umbrina roncador*)
+
+```{r Species 3}
+
+#Umbrina roncador
+
+sort_species3[3]
+
+umb_ro_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_depth_withshore
+
+ggplot(umb_ro_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Umbrina roncador") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro_withshore
+
+#Reorder stations
+umbro_withshore$data$Station <- factor(umbro_withshore$data$Station, levels=neworder_full)
+umbro_withshore
+
+```
+
+Species 4 (*Paralabrax clathratus*)
+
+```{r Species 4}
+
+#Paralabrax clathratus
+
+sort_species3[4]
+
+par_cl_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_depth_withshore
+
+ggplot(par_cl_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax clathratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl_withshore
+
+#Reorder stations
+
+parcl_withshore$data$Station <- factor(parcl_withshore$data$Station, levels=neworder_full)
+parcl_withshore
+
+```
+
+Species 5 (*Seriphus politus*)
+
+```{r Species 5}
+
+#Seriphus politus
+
+sort_species3[5]
+
+ser_po_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_depth_withshore
+
+ggplot(ser_po_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Seriphus politus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo_withshore
+
+#Reorder stations
+serpo_withshore$data$Station <- factor(serpo_withshore$data$Station, levels=neworder_full)
+serpo_withshore
+
+```
+
+Species 6 (*Paralabrax nebulifer*)
+
+```{r Species 6}
+
+#Paralabrax nebulifer
+
+sort_species3[6]
+
+par_ne_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_depth_withshore
+
+ggplot(par_ne_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax nebulifer") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne_withshore
+
+#Reorder stations
+parne_withshore$data$Station <- factor(parne_withshore$data$Station, levels=neworder_full)
+parne_withshore
+
+```
+
+Species 7 (*Hermosilla azurea*)
+
+```{r Species 7}
+
+#Hermosilla azurea
+
+HerAz<- sort_species3[7]
+GoodHerAz = names(HerAz)
+BadHerAz <- setdiff(taxa_names(physeq_obj_sub), GoodHerAz)
+Her_Az <- prune_taxa(GoodHerAz, physeq_obj_sub)
+taxa_names(Her_Az)
+
+vegan_otu(Her_Az) -> her_az_table
+
+her_az_table <- as.data.frame(her_az_table)
+
+her_az_table %>%
+  rename(Species = colnames(her_az_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Day, -Replicate, -miu_elas) %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_depth_withshore
+
+
+ggplot(her_az_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Hermosilla azurea") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz_withshore
+
+#Reorder stations
+heraz_withshore$data$Station <- factor(heraz_withshore$data$Station, levels=neworder_full)
+heraz_withshore
+
+```
+
+Species 8 (*Sardinops sagax*)
+
+```{r Species 8}
+
+#Sardinops sagax
+
+sort_species3[8]
+
+sar_sa_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_depth_withshore
+
+ggplot(sar_sa_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=30), plot.title = element_text(size=40, face = "italic"), 
+        axis.text = element_text(size=25)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Sardinops sagax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa_withshore
+
+#Reorder stations
+sarsa_withshore$data$Station <- factor(sarsa_withshore$data$Station, levels=neworder_full)
+sarsa_withshore
+
+```
+
+
+
