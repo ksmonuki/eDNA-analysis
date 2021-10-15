@@ -1,0 +1,91 @@
+D1_0m_A,D1_0m_B,D1_0m_C,D1_10m_A,D1_10m_B,D1_10m_C,D1_1m_A,D1_1m_B,D1_1m_C,D1_5m_A,D1_5m_B,D1_5m_C,D1_9m_A,D1_9m_B,D1_9m_C,D1_SHR_A,D1_SHR_B,D1_SHR_C,D2_0m_A,D2_0m_B,D2_0m_C,D2_10m_A_e,D2_10m_A_m,D2_10m_B,D2_10m_C,D2_1m_A,D2_1m_B,D2_1m_C,D2_5m_A,D2_5m_B,D2_5m_C,D2_9m_A,D2_9m_B,D2_9m_C,D2_SHR_A,D2_SHR_B,D2_SHR_C,D3_0m_A,D3_0m_B,D3_0m_C,D3_10m_A,D3_10m_B,D3_10m_C,D3_1m_A,D3_1m_B,D3_1m_C,D3_5m_A,D3_5m_B,D3_5m_C,D3_9m_A,D3_9m_B,D3_9m_C,D3_SHR_A,D3_SHR_B,D3_SHR_C,sum.taxonomy
+1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Embiotocidae;;
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Embiotoca;Embiotoca jacksoni
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Chondrichthyes;Carcharhiniformes;Triakidae;Mustelus;Mustelus californicus
+1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,1,1,1,0,1,Eukaryota;Chordata;Actinopteri;;Pomacentridae;Chromis;Chromis punctipinnis
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,NA
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,1,0,0,0,0,0,1,0,0,0,0,Eukaryota;Chordata;Actinopteri;;Pomacentridae;Hypsypops;Hypsypops rubicundus
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;;Pomacentridae;Stegastes;Stegastes nigricans
+1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,Eukaryota;Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Leuresthes;Leuresthes tenuis
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,1,0,0,1,0,0,0,0,0,0,Eukaryota;Chordata;Aves;Passeriformes;Sylviidae;Regulus;Regulus calendula
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Clinidae;Heterostichus;Heterostichus rostratus
+1,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,1,0,1,1,1,0,Eukaryota;Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Medialuna;Medialuna californiensis
+0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;Beloniformes;Belonidae;Strongylura;Strongylura exilis
+0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Amphistichus;
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Aves;Passeriformes;Certhiidae;Campylorhynchus;Campylorhynchus zonatus
+0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,Eukaryota;Chordata;Actinopteri;;Sciaenidae;Menticirrhus;
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Atheriniformes;Atherinopsidae;Atherinops;Atherinops affinis
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,Eukaryota;Chordata;Mammalia;Primates;Cercopithecidae;;
+0,0,0,1,0,0,0,1,0,1,1,0,1,1,1,0,0,0,1,0,0,1,0,1,1,0,0,0,0,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1,0,0,0,Eukaryota;Chordata;Chondrichthyes;;Squatinidae;Squatina;Squatina californica
+0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Hermosilla;Hermosilla azurea
+0,0,0,1,1,1,0,0,0,1,0,0,1,1,1,1,0,1,1,0,0,0,1,1,1,0,0,0,0,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Mammalia;Artiodactyla;Delphinidae;Tursiops;Tursiops truncatus
+0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1,0,0,1,1,1,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,0,Eukaryota;Chordata;Mammalia;Primates;Hominidae;Homo;Homo sapiens
+0,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,0,1,0,1,1,0,1,1,1,0,0,0,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Labriformes;Labridae;Halichoeres;Halichoeres semicinctus
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Clinidae;Gibbonsia;
+1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,0,1,0,0,0,0,1,1,0,1,0,1,0,0,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,0,1,1,0,0,1,0,0,1,Eukaryota;Chordata;Chondrichthyes;Heterodontiformes;Heterodontidae;Heterodontus;Heterodontus francisci
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Sciaenidae;Seriphus;Seriphus politus
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Sciaenidae;Umbrina;Umbrina roncador
+0,0,1,1,1,1,0,0,0,0,0,0,1,1,1,0,1,0,1,0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Labriformes;Labridae;Semicossyphus;Semicossyphus pulcher
+0,0,1,1,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,0,0,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,Eukaryota;Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax nebulifer
+1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Scombriformes;Scombridae;Scomber;Scomber japonicus
+0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Girella;Girella nigricans
+1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Clupeiformes;Engraulidae;Engraulis;Engraulis mordax
+0,1,0,1,1,1,0,0,0,1,1,1,1,1,1,1,0,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;Citharichthys stigmaeus
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+0,0,0,1,0,1,1,0,1,1,0,1,1,1,1,0,0,1,0,1,0,1,1,1,1,1,1,0,1,1,0,1,1,0,0,0,1,1,1,1,1,1,0,1,1,1,0,1,0,0,1,1,0,0,1,Eukaryota;Chordata;Actinopteri;Labriformes;Labridae;Oxyjulis;Oxyjulis californica
+0,0,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,1,1,1,0,1,1,0,0,0,1,1,1,0,1,1,1,1,1,1,0,0,0,0,0,1,1,0,1,1,1,1,0,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Micrometrus;Micrometrus minimus
+1,1,0,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,1,1,1,0,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,0,0,1,1,1,1,1,1,0,0,1,1,0,1,Eukaryota;Chordata;Chondrichthyes;Carcharhiniformes;Triakidae;Triakis;Triakis semifasciata
+0,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1,1,1,1,1,0,1,0,0,0,0,1,1,0,0,0,1,0,0,0,1,1,0,Eukaryota;Chordata;Chondrichthyes;Pristiformes/Rhiniformes group;Rhinobatidae;Pseudobatos;Pseudobatos productus
+1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,1,1,0,0,1,0,0,0,1,1,0,0,0,0,1,1,0,1,1,0,0,0,1,0,0,Eukaryota;Chordata;Mammalia;Artiodactyla;Delphinidae;;
+0,0,1,1,1,1,0,0,0,1,1,0,0,1,1,0,1,1,0,0,0,1,1,1,1,0,0,0,1,1,0,1,1,0,1,1,0,1,1,1,1,1,1,1,0,0,1,1,1,0,1,1,0,1,0,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Rhacochilus;Rhacochilus vacca
+1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,1,1,1,1,1,1,0,Eukaryota;Chordata;Actinopteri;Lutjaniformes;Haemulidae;Anisotremus;Anisotremus davidsonii
+1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,0,0,0,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,1,0,1,1,0,1,1,1,Eukaryota;Chordata;Mammalia;Carnivora;Otariidae;Zalophus;Zalophus californianus
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Clupeiformes;Clupeidae;Sardinops;Sardinops sagax
+1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,1,0,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Gobiesocidae;Rimicola;Rimicola muscarum
+0,0,0,1,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,1,1,0,0,1,1,0,0,1,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;;Malacanthidae;Caulolatilus;Caulolatilus princeps
+1,1,0,1,1,1,0,0,0,1,1,1,1,0,1,1,1,1,0,0,0,1,0,0,1,0,0,1,0,0,1,1,0,0,1,1,1,0,1,0,0,0,0,0,1,0,1,0,1,0,0,0,1,1,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Blenniidae;Hypsoblennius;Hypsoblennius gilberti
+0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,0,1,1,0,0,0,0,Eukaryota;Chordata;Actinopteri;Perciformes;Cottidae;Ruscarius;Ruscarius creaseri
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Mammalia;Artiodactyla;Suidae;Sus;Sus scrofa
+0,0,0,1,1,1,0,0,0,1,0,0,1,1,1,1,0,1,1,0,0,1,1,0,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,1,0,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Paralichthys;Paralichthys californicus
+0,0,0,0,1,1,0,0,0,0,1,1,1,0,1,1,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,Eukaryota;Chordata;Actinopteri;Mugiliformes;Mugilidae;Mugil;Mugil cephalus
+0,0,0,1,1,0,1,0,0,1,0,0,1,1,1,0,1,0,1,0,0,0,0,1,1,0,1,0,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,0,0,1,0,1,0,0,1,1,1,0,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Blenniidae;Hypsoblennius;Hypsoblennius jenkinsi
+0,0,0,1,0,1,0,0,0,0,1,1,1,0,0,0,0,0,1,0,1,1,1,1,0,0,1,0,0,1,0,1,1,1,0,1,1,1,0,1,1,1,1,1,1,1,0,0,1,1,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Gobiiformes;Gobiidae;Typhlogobius;Typhlogobius californiensis
+0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,1,1,1,0,0,0,0,0,1,0,0,1,1,0,1,0,0,0,1,1,1,0,0,1,1,1,1,1,0,1,1,1,1,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;Citharichthys sordidus
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Perciformes;Serranidae;Paralabrax;Paralabrax clathratus
+1,0,1,1,0,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,0,0,1,1,1,1,0,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Cynoglossidae;Symphurus;Symphurus atricaudus
+0,0,1,1,1,1,0,1,0,0,0,1,0,1,0,1,1,1,0,0,1,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;Perciformes;Sebastidae;Sebastes;
+0,1,0,0,1,1,0,0,0,0,0,1,1,1,1,0,0,0,1,0,0,0,1,1,1,0,0,0,0,0,0,0,0,1,1,0,1,0,0,1,0,1,1,0,1,1,1,1,1,0,1,1,1,0,0,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Rhacochilus;Rhacochilus toxotes
+0,0,0,0,1,1,1,0,0,1,0,1,1,1,1,0,0,0,1,0,0,1,0,1,1,0,0,0,0,0,0,1,0,1,1,0,1,0,0,1,0,0,0,1,1,0,0,1,0,0,0,0,1,1,0,Eukaryota;Chordata;Actinopteri;Blenniiformes;Labrisomidae;Paraclinus;Paraclinus integripinnis
+1,0,1,1,0,1,0,0,0,1,1,1,0,0,1,1,1,1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,1,1,0,1,0,0,0,0,1,1,1,1,0,1,0,1,0,0,0,1,Eukaryota;Chordata;Mammalia;Carnivora;Canidae;Canis;Canis lupus
+0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,1,0,1,0,0,0,0,0,1,1,0,1,0,0,0,0,1,1,1,0,0,0,0,0,0,1,1,1,0,0,0,0,1,0,0,1,1,1,0,0,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Cymatogaster;Cymatogaster aggregata
+0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,0,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Perciformes;Hexagrammidae;Oxylebius;Oxylebius pictus
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,Eukaryota;Chordata;Aves;Charadriiformes;Charadriidae;Pluvialis;Pluvialis dominica
+0,0,0,1,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,1,0,0,1,0,0,1,1,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Hypsurus;Hypsurus caryi
+0,1,0,1,0,1,0,1,0,1,1,0,1,1,1,0,1,1,0,0,0,0,0,1,0,0,0,0,0,1,0,1,0,1,1,1,1,0,1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,1,Eukaryota;Chordata;Actinopteri;Blenniiformes;Clinidae;Gibbonsia;Gibbonsia montereyensis
+1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Sciaenidae;Menticirrhus;Menticirrhus undulatus
+1,0,0,0,0,1,1,0,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,0,1,1,0,1,0,1,0,1,0,0,0,0,1,1,0,1,0,0,0,Eukaryota;Chordata;Actinopteri;;Sphyraenidae;Sphyraena;Sphyraena argentea
+0,0,0,1,1,0,0,0,0,0,1,1,0,0,1,1,0,0,1,0,0,0,0,1,0,1,0,0,0,0,1,0,0,0,0,0,1,1,0,0,0,1,0,0,1,1,0,1,0,0,0,0,1,0,0,Eukaryota;Chordata;Actinopteri;Perciformes;Cottidae;Scorpaenichthys;Scorpaenichthys marmoratus
+0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,Eukaryota;Chordata;Aves;Pelecaniformes;Pelecanidae;Pelecanus;Pelecanus occidentalis
+0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,Eukaryota;Chordata;Actinopteri;Syngnathiformes;Syngnathidae;Syngnathus;Syngnathus leptorhynchus
+0,0,0,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,Eukaryota;Chordata;Mammalia;Primates;Hominidae;Pan;Pan paniscus
+0,0,0,0,0,1,0,0,0,1,1,0,1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,1,0,1,0,0,0,0,0,0,0,Eukaryota;Chordata;Mammalia;Carnivora;Phocidae;Phoca;
+0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,1,0,0,0,1,1,Eukaryota;Chordata;Actinopteri;Perciformes;Cottidae;Clinocottus;Clinocottus analis
+0,0,0,0,0,1,0,0,0,0,1,1,0,1,1,1,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,1,1,Eukaryota;Chordata;Chondrichthyes;;Platyrhinidae;Platyrhinoidis;Platyrhinoidis triseriata
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Embiotocidae;Brachyistius;Brachyistius frenatus
+0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,0,1,0,0,1,1,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Carangiformes;Carangidae;Trachurus;Trachurus symmetricus
+0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,1,0,1,1,1,0,1,0,0,1,1,1,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Aulopiformes;Synodontidae;Synodus;Synodus lucioceps
+0,0,0,1,0,1,1,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,Eukaryota;Chordata;Chondrichthyes;Myliobatiformes;Gymnuridae;Gymnura;Gymnura marmorata
+1,0,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,1,1,1,1,0,1,1,0,0,0,1,1,0,0,0,0,1,0,1,1,1,1,Eukaryota;Chordata;Actinopteri;;Sciaenidae;Cheilotrema;Cheilotrema saturnum
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Aves;Charadriiformes;Laridae;Larus;
+0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;Pleuronectiformes;Pleuronectidae;Pleuronichthys;Pleuronichthys verticalis
+0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,Eukaryota;Chordata;Actinopteri;Perciformes;Scorpaenidae;Scorpaena;Scorpaena guttata
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;Perciformes;Serranidae;Epinephelus;Epinephelus merra
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,1,1,0,0,1,0,0,1,0,0,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Ophidiiformes;Ophidiidae;Ophidion;Ophidion scrippsae
+1,0,0,1,0,1,0,0,0,0,0,0,0,1,0,1,1,1,0,0,0,1,0,1,1,0,0,0,0,0,0,1,1,1,1,1,1,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,1,1,1,Eukaryota;Chordata;Aves;Pelecaniformes;Phalacrocoracidae;Urile;Urile pelagicus
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,Eukaryota;Chordata;Actinopteri;Perciformes;Cottidae;Clinocottus;Clinocottus recalvus
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Aves;Charadriiformes;Laridae;Larus;Larus occidentalis
+1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,Eukaryota;Chordata;Chondrichthyes;Myliobatiformes;Myliobatidae;Myliobatis;Myliobatis californica
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,Eukaryota;Chordata;Actinopteri;Gobiiformes;Gobiidae;Lethops;Lethops connectens
+0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Aves;Procellariiformes;;;
+0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,Eukaryota;Chordata;Actinopteri;Scombriformes;Scombridae;Sarda;Sarda chiliensis

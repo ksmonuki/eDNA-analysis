@@ -1,0 +1,916 @@
+---
+title: "Keira Decontamination"
+author: "Zack Gold"
+date: "8/5/2020"
+output: html_document
+---
+---
+#Load Libraries
+```{r load libraries, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+
+library (tidyverse)
+library (vegan)
+library (proxy)
+library(reshape2)
+library(microDecon)
+
+```
+#Load Data
+```{r load datasets - we will be doing that for all runs}
+
+Local_folder <- "/Users/zackgold/Documents/UCLA_phd/Projects/California/keira_beach_edna/data"
+
+setwd("/Users/zackgold/Documents/UCLA_phd/Projects/California/Keira_honors_thesis/anacapa/august2020/")
+
+#Paths to Files
+#12S Universal
+input_biom_path_keira_12S_Uni <- "/Users/zackgold/Documents/UCLA_phd/Projects/California/Keira_honors_thesis/anacapa/august2020/fishcard_12S_all_taxonomy_tables/Summary_by_percent_confidence/60/fishcard_12S_all_ASV_raw_taxonomy_60_edited.txt"
+
+#Metadata
+input_meta_path <- "/Users/zackgold/Documents/UCLA_phd/Projects/California/Keira_honors_thesis/analysis/decontamination/KM_metadata_4.2.19_edited.txt"
+metadata <- read.table(input_meta_path, header = 1, sep = "\t", stringsAsFactors = F)
+
+#Hash Keys
+Hash.key <- readRDS(file="/Users/zackgold/Documents/UCLA_phd/Projects/California/Keira_honors_thesis/anacapa/august2020/best_hashes_chosen_08052020")
+
+Hash.key %>% 
+  dplyr::select(seq_number, sum.taxonomy= to_keep) -> Hash.key
+
+```
+
+```{r How.many}
+how.many <- function(ASVtable, round){
+  ASVtable %>% ungroup() %>% 
+    dplyr::summarise(nsamples = n_distinct(sample),
+              nHashes = n_distinct(Hash),
+              nReads = sum(nReads), 
+              Stage = paste0("Step_", round)) %>% 
+    gather(starts_with("n"), value = "number", key = "Stat")
+}
+```
+
+```{r}
+#Add Column for Unique Run
+
+keira_miu <- read.table(input_biom_path_keira_12S_Uni, header = 1, sep = "\t", stringsAsFactors = F)
+keira_miu$Miseq_run <- "keira_miu"
+miu_names <- colnames(keira_miu)
+head(keira_miu)
+dim(keira_miu)
+
+New_name
+
+#Fix Names
+anacapa_table_1_names <- colnames(keira_miu)
+anacapa_table_1_names %>% as.data.frame() -> anacapa_table_1_names
+colnames(anacapa_table_1_names) <- c("Sample_name")
+left_join(anacapa_table_1_names, metadata) %>% dplyr::select(Sample_name, New_name) %>% 
+  mutate(final_names = coalesce(New_name, Sample_name)) %>%  dplyr::select(final_names) %>% as.list() -> anacapa_table_1_names
+colnames(keira_miu) <- anacapa_table_1_names$final_names
+
+
+#Merge All Tables
+ASV.table <- bind_rows(keira_miu)
+tail(ASV.table)
+head(ASV.table)
+
+#Format for Long Data
+ASV.table$seq_number <- factor(ASV.table$seq_number)
+ASV.table$Miseq_run <- factor(ASV.table$Miseq_run)
+
+columns <- colnames(ASV.table)
+remove <- c("seq_number","sum.taxonomy","Miseq_run")
+
+gathercols <-  columns[! columns %in% remove] 
+
+# Convert to Long Data
+ASV.table <- gather(ASV.table, sample, reads, gathercols, factor_key=TRUE)
+ASV.table$reads <- as.numeric(ASV.table$reads)
+
+
+```
+
+# Cleaning Process 0: ** Remove all Forward, Reverse, and Unmerged reads**
+
+```{r}
+
+#Filter Merged only reads
+ASV.table %>% 
+  filter(., str_detect(seq_number,"merged")) %>% 
+    filter(., !str_detect(seq_number,"unmerged")) -> ASV.table_merged
+
+#Calculate % ASVs Kept
+ASV.table %>%  dim() -> all_dim
+ASV.table_merged %>%  dim() -> merged_only_dim
+
+(merged_only_dim[[1]]/all_dim[[1]]*100)
+#.31% of ASVs retained....
+
+#Save Merged ASV Table since the above loading steps are time intensive
+saveRDS(ASV.table_merged,file="ASV.table_merged") 
+readRDS(file="ASV.table_merged") -> ASV.table_merged
+```
+
+## Cleaning Process 1: Estimation of *Tag-jumping* or sample *cross-talk*
+```{r split into positives and samples}
+
+#Remove Singletons (since we can not use them ever)
+#ASV.table %>%
+#  dplyr::group_by(Seq_number) %>%
+#  mutate (TotalReadsperSample = sum(reads)) %>% 
+#  filter(., TotalReadsperSample > 1) %>% 
+#  dplyr::select(-TotalReadsperSample) -> ASV.table
+
+#Create list of control samples
+metadata %>% 
+  filter(Sample_control=="CONTROL") %>% 
+  dplyr::select(New_name) -> controls
+controls <- controls$New_name
+
+metadata %>% 
+  filter(Type=="Pos") %>% 
+  dplyr::select(New_name) -> pos_controls
+pos_controls <- pos_controls$New_name
+
+metadata %>% 
+  filter(Type=="Blank") %>% 
+  dplyr::select(New_name) -> neg_controls
+neg_controls <- neg_controls$New_name
+
+#New column that labels each ASV as from Positive (control) or Sample
+ASV.table_merged %>% 
+  mutate(source = case_when(sample %in% pos_controls~"Positives",
+                            sample %in% neg_controls~"Blanks",
+                             TRUE ~"Samples")) -> ASV.table_merged
+  
+#Convert to tibble
+ASV.table_merged <- as_tibble(ASV.table_merged)
+
+#Remove empty sequences
+ASV.table_merged %>% 
+  filter(reads != 0)  -> ASV.table_merged
+
+#Rename Columns and remove seq_number
+ASV.table_merged %>%
+  mutate(Hash = as.character(seq_number),
+         sample = as.character(sample),
+         nReads = reads) %>% 
+  dplyr::select(-seq_number)  -> ASV.table_merged
+
+ASV.table_merged %>% 
+  filter (source != "Samples") %>%
+  dplyr::group_by(Hash) %>% 
+  dplyr::summarise(tot = sum(reads)) %>% 
+  arrange(desc(tot)) %>% 
+  pull(Hash) -> all.seqs.in.ctrls
+
+Hash.key %>% 
+  filter(seq_number %in% all.seqs.in.ctrls) %>% as.tibble() -> contam.species
+
+```
+```{r}
+ASV.table_merged %>% 
+  group_by(sample) %>%
+  filter(., Miseq_run=="keira_miu") %>% 
+  mutate (TotalReadsperSample = sum(nReads)) %>%
+  arrange(desc(TotalReadsperSample)) %>%
+  ggplot(., aes(x=sample, y=TotalReadsperSample, color=source)) + geom_point() +ggtitle("Miu-Read Count Across Samples") + theme(axis.text.x = element_text(angle = 90))
+```
+
+### Step 1: Nest the dataset and split it in positives and samples
+```{r nesting the dataset}
+ASV.table_merged %>% 
+  dplyr::group_by(Miseq_run, source) %>% 
+  nest() %>% 
+  pivot_wider(names_from=source, values_from=data) -> ASV.nested
+```
+
+```{r summary.file}
+ASV.nested %>% 
+  ungroup() %>% 
+  dplyr::transmute(.,Miseq_run,Summary = purrr::map(Samples, ~ how.many(ASVtable = ., round = 0)))  -> ASV.summary
+
+ASV.summary$Summary
+#Elas had some samples in which all reads were removed
+```
+
+
+### Step 2: Model the composition of the positive controls of each run 
+```{r jumping vector}
+
+ASV.nested %>% 
+  mutate (contam.tibble = purrr::map(Positives, 
+                              function(.x){
+                                .x %>%
+                                  ungroup() %>% 
+                                  group_by(sample) %>%
+                                  mutate (TotalReadsperSample = sum(nReads)) %>%
+                                  mutate (proportion = nReads/TotalReadsperSample) %>%
+                                  group_by(Hash) %>%
+                                  dplyr::summarise (vector_contamination = max(proportion))
+                                }) ) -> ASV.nested
+
+
+ASV.nested$contam.tibble[[1]] %>% as.data.frame() %>% 
+  ggplot(aes(x= vector_contamination))+
+  geom_histogram()# Check how it looks
+
+```
+
+### Step 3: Substract the composition of the positive controls from the environment samples
+```{r cleaning step 1}
+ASV.nested %>% 
+  ungroup() %>% 
+  mutate(cleaned.tibble = map2(Samples, contam.tibble, function(.x,.y){ 
+    .x %>%
+      dplyr::group_by (sample) %>%
+      mutate (TotalReadsperSample = sum (nReads)) %>%
+      left_join(.y, by = "Hash") %>%
+      mutate (Updated_nReads = ifelse (!is.na(vector_contamination),  nReads - (ceiling(vector_contamination*TotalReadsperSample)), nReads)) %>%
+      filter (Updated_nReads > 0) %>%
+      ungroup() %>% 
+      dplyr::select (sample, Hash, nReads = Updated_nReads)
+  })) -> ASV.nested
+
+
+ASV.nested$cleaned.tibble[[1]] %>% as.data.frame() %>% 
+  arrange(desc(nReads)) %>% head(n=100) #Check how they look
+
+```
+
+```{r summary.file.2}
+ASV.nested %>% 
+  transmute(Miseq_run, Summary.1 = purrr::map(cleaned.tibble, ~ how.many(ASVtable = .,round = "1.Jump"))) %>% 
+  left_join(ASV.summary) %>% #use left join when there are many miseq runs to join
+  mutate(Summary   = map2(Summary, Summary.1, bind_rows)) %>%
+  dplyr::select(-Summary.1) -> ASV.summary 
+
+ASV.summary$Summary
+```
+
+## Cleaning Process 2: **Discarding PCR replicates with low number of reads**
+```{r fitting nReads per sample}
+
+ASV.nested %>% 
+  select(Miseq_run,cleaned.tibble) %>% 
+  unnest(cleaned.tibble) %>%
+  group_by(Miseq_run,sample) %>%
+  dplyr::summarise(tot = sum(nReads)) %>% 
+  arrange(desc(tot))-> all.reps
+
+
+all.reps %>%
+  ungroup() %>% 
+  mutate(., to_keep = case_when(tot > 100000 ~ ">100K",
+                                tot > 75000 ~ ">75K",
+                                tot > 50000 ~ ">50K",
+                                tot > 25000 ~ ">25K",
+                                tot > 10000 ~ ">10K",
+                                TRUE ~ "TRASH")) %>% 
+  count(to_keep) %>% 
+  mutate(., total=sum(n)) %>% 
+  mutate(per=paste0(round(100*n/total,2),'%')) %>% 
+  dplyr::select(-total)
+
+# Visualize
+
+all.reps %>%  
+  pull(tot) -> reads.per.sample
+
+names(reads.per.sample) <- all.reps %>% pull(sample)  
+
+normparams.reads <- MASS::fitdistr(reads.per.sample, "normal")$estimate
+
+all.reps %>%  
+  mutate(prob = pnorm(tot, normparams.reads[1], normparams.reads[2])) -> all.reps
+
+#  probs <- pnorm(all_pairwise_distances, normparams[1], normparams[2])
+
+outliers <- all.reps %>% 
+  filter(prob < 0.03  | tot <10000)
+
+#Updated to not include samples less than 10K
+
+outliers %>%  filter(., Miseq_run=="keira_miu") -> keira_miu_outliers
+ASV.nested$cleaned.tibble[[1]] %>% 
+   filter(.,!sample %in% keira_miu_outliers$sample) -> keira_miu.step1.low.reads
+
+ASV.nested %>% 
+  mutate(Step.1.low.reads = list(keira_miu.step1.low.reads)) -> ASV.nested
+
+ASV.nested %>% 
+  transmute(Miseq_run, Summary.1 = purrr::map(Step.1.low.reads, ~ how.many(ASVtable = .,round = "2.Low.nReads"))) %>% 
+  left_join(ASV.summary) %>% 
+  mutate(Summary   = map2(Summary, Summary.1, bind_rows)) %>%
+  dplyr::select(-Summary.1) -> ASV.summary 
+
+ASV.summary$Summary
+```
+
+#####MicroDecon Miu
+```{r cleaning.Step2}
+ASV.nested$Blanks[[1]] %>% 
+  select(sample,Hash, nReads) -> blankers
+
+ASV.nested$Step.1.low.reads[[1]] %>%
+  mutate(New_name=sample) %>% 
+  left_join(metadata) %>% 
+  unite(., Site, c("Collected_Date", "Location") ) %>% 
+  dplyr::select(sample=New_name,Hash, nReads, Site) %>% 
+  arrange(Site) %>% dplyr::select(-Site) -> miu_long
+
+
+rbind(blankers, miu_long) -> step.1.1
+
+step.1.1 %>% 
+pivot_wider(names_from=sample, values_from=nReads, values_fill = list(nReads =0)) -> step.1.1_wide
+
+step.1.1_wide %>%
+  mutate(seq_number=Hash) %>% 
+  left_join(Hash.key) %>%
+  select(-seq_number) -> step.1.1_wide
+
+as.data.frame(step.1.1_wide) -> step.1.1_wide
+#step.1.1_wide %>% View()
+
+ASV.nested$Blanks[[1]]$sample %>% unique() %>% length() -> blank_num
+ASV.nested$Step.1.low.reads[[1]]$sample %>% unique() %>% length() -> sample_num
+
+ASV.nested$Blanks[[1]]$sample %>% unique() -> blank_samples
+
+append(blank_samples, c("sum.taxonomy","Hash")) -> col_delete
+colnames(step.1.1_wide) %>%  as.data.frame() %>% 
+  filter(., !(. %in% col_delete)) %>% 
+  mutate(., New_name=.) %>% 
+  left_join(metadata) %>% 
+  unite(., Site, c("Collected_Date", "Location") ) %>% 
+  dplyr::select(New_name,Site) %>% 
+  group_by(Site) %>% 
+  count() -> sample_counter
+sample_counter$n
+
+#rep(3, times = (sample_num/3))
+step.1.1_decon_miu <- decon(data=step.1.1_wide, numb.blanks = blank_num, numb.ind=sample_counter$n
+, taxa = T, prop.thresh = 5e-05)
+
+
+  
+#step.1.1_decon_elas_a$reads.removed %>% View()
+step.1.1_decon_miu$OTUs.removed %>% View()
+
+columns <- colnames(step.1.1_decon_miu$decon.table)
+remove <- c("Hash","sum.taxonomy")
+
+gathercols <-  columns[! columns %in% remove] 
+
+# Convert to Long Data
+step.1.1_decon_miu_clean <- gather(step.1.1_decon_miu$decon.table, sample, nReads, gathercols, factor_key=TRUE)
+
+step.1.1_decon_miu_clean %>% as.tibble() %>% 
+  select(-sum.taxonomy) %>% 
+  filter(., sample != "Mean.blank") %>% 
+  filter(., nReads >0) -> step.1.1_decon_miu_clean_tibble
+
+```
+
+#####MicroDecon CO1
+Skipped because no merged reads in the blanks
+
+
+```{r Save Files Before Occupancy}
+saveRDS(step.1.1_decon_miu, file="step.1.1_decon_miu")
+
+ASV.nested %>% 
+  mutate(Step2.tibble = list(step.1.1_decon_miu_clean_tibble)) -> ASV.nested
+
+saveRDS(ASV.nested, file = "Cleaning.before.Occ.model")
+
+ASV.nested %>% 
+  transmute(Miseq_run, Summary.1 = purrr::map(Step2.tibble, ~ how.many(ASVtable = .,round = "3.Positives"))) %>%
+  left_join(ASV.summary) %>% 
+  mutate(Summary = map2(Summary, Summary.1, bind_rows)) %>%
+  dplyr::select(-Summary.1) -> ASV.summary
+
+saveRDS(ASV.summary, file = "ASV.summary.rds")
+
+ASV.summary$Summary
+```
+
+```{r}
+ASV.summary <- readRDS(file ="ASV.summary.rds")
+
+ASV.nested <- readRDS(file ="Cleaning.before.Occ.model")
+
+```
+
+## Cleaning Process 4: **Occupancy modelling**
+
+
+```{r importing Occ results}
+
+keira_occupancy_results_all <- readRDS(file="keira_occupancy_results_all.RDS")
+keira_occupancy_results_9 <- readRDS(file="keira_occupancy_results_9.RDS")
+
+ASV.nested <- readRDS(file ="Cleaning.before.Occ.model")
+ASV.summary <- readRDS(file ="ASV.summary.rds")
+
+```
+
+```{r Visualize SOM}
+#View Histogram
+keira_occupancy_results_all %>% 
+  pull(max_Occupancy_prob) %>% 
+  hist()
+#Vast majority of ASVs were detected only in 1 technical replicate.
+
+```
+
+```{r actual filtering}
+
+ASV.nested$Step2.tibble[[1]]
+ASV.nested %>% 
+  mutate (Step2.tibble.edited = purrr::map(Step2.tibble, 
+                              function(.x){
+                                .x %>%
+                                   left_join(metadata, by=c("sample"="New_name")) %>%
+                                  mutate(., seq_number=Hash) %>% 
+                                   left_join(Hash.key) %>% 
+                                  dplyr::select(sample, Hash, nReads, sum.taxonomy)
+                                }) ) -> ASV.nested
+
+ASV.nested %>% 
+mutate(Step3.tibble.9 = purrr::map (Step2.tibble.edited, ~ filter(.,sum.taxonomy %in% keira_occupancy_results_9$sum.taxonomy) %>% ungroup))-> ASV.nested
+
+ASV.nested %>% 
+  transmute(Miseq_run, Summary.1 = purrr::map(Step3.tibble.9, ~ how.many(ASVtable = .,round ="4.Occupancy.9"))) %>% 
+  left_join(ASV.summary) %>%
+  mutate(Summary   = map2(Summary, Summary.1, bind_rows)) %>%
+  dplyr::select(-Summary.1) -> ASV.summary
+
+ASV.summary$Summary
+#Discarded the vast majority of ASVs, but retained most of the reads
+```
+
+```{r}
+saveRDS(ASV.nested,file="ASV.nested_post_occ.RDS")
+saveRDS(ASV.summary,file="ASV.summary_post_occ.RDS")
+
+ASV.nested <- readRDS(file ="ASV.nested_post_occ.RDS")
+ASV.summary <- readRDS(file ="ASV.summary_post_occ.RDS")
+```
+
+## Cleaning Process 5: **Dissimilarity between PCR (biological) replicates**
+```{r dissimilarity between PCR replicates}
+
+ASV.nested %>% 
+  dplyr::select(Miseq_run,Step3.tibble.9) %>% 
+  unnest(Step3.tibble.9) %>% 
+  ungroup() %>% 
+  dplyr::group_by(sum.taxonomy,sample) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  left_join(metadata, by=c("sample"="New_name"))  -> cleaned.tibble.post_occ.9
+
+ASV.nested %>% 
+ dplyr::select(Miseq_run,Step2.tibble) %>% 
+  unnest(Step2.tibble) %>% 
+  ungroup() %>% 
+  mutate(seq_number=Hash) %>% 
+  left_join(Hash.key) %>% 
+  dplyr::group_by(sum.taxonomy,sample) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  left_join(metadata, by=c("sample"="New_name")) -> cleaned.tibble.pre_occ
+
+```
+
+```{r quick check}
+
+cleaned.tibble.post_occ.9 %>%
+  ungroup() %>% 
+  dplyr::summarise(n_distinct(sample), #55
+            n_distinct(sum.taxonomy))  #90
+
+cleaned.tibble.pre_occ %>% 
+  ungroup() %>% 
+  dplyr::summarise(n_distinct(sample), # 55
+            n_distinct(sum.taxonomy)) #156
+
+# Let's check the levels of replication
+
+cleaned.tibble.post_occ.9 %>% 
+  group_by(Collected_Date,Location) %>% 
+  dplyr::summarise(nrep = n_distinct(Replicate)) %>%
+  filter (nrep == 3) #18
+  #filter (nrep == 2) # 2
+  #filter (nrep == 1) # 0
+
+cleaned.tibble.pre_occ %>% 
+  group_by(Collected_Date,Location) %>% 
+  dplyr::summarise(nrep = n_distinct(Replicate)) %>%
+  filter (nrep == 3) #18
+  #filter (nrep == 2) # 2
+  #filter (nrep == 1) # 0
+
+```
+
+```{r lets do the PCR replication}
+cleaned.tibble.post_occ.9 %>%
+  ungroup() %>% 
+  dplyr::group_by(sample) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) -> cleaned.tibble.post_occ.9 #transforms raw number of reads to eDNA index
+
+cleaned.tibble.pre_occ %>%
+    ungroup() %>% 
+  dplyr::group_by (sample) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) -> cleaned.tibble.pre_occ #transforms raw number of reads to eDNA index
+
+
+tibble_to_matrix <- function (tb) {
+  tb  %>% 
+    group_by(sample, sum.taxonomy) %>% 
+    dplyr::summarise(nReads = sum(Normalized.reads)) %>% 
+    spread ( key = "sum.taxonomy", value = "nReads", fill = 0) %>% 
+      ungroup() -> matrix_1
+    samples <- pull (matrix_1, sample)
+    matrix_1[,-1] -> matrix_1
+    data.matrix(matrix_1) -> matrix_1
+    dimnames(matrix_1)[[1]] <- samples
+    vegdist(matrix_1) -> matrix_1
+}
+
+tibble_to_matrix (cleaned.tibble.post_occ.9) -> all.distances.full.post.9
+tibble_to_matrix (cleaned.tibble.pre_occ) -> all.distances.full.pre
+
+
+#names(all.distances.full)
+
+summary(is.na(names(all.distances.full.post.9)))
+summary(is.na(names(all.distances.full.pre)))
+
+
+```
+
+```{r}
+as.tibble(subset(melt(as.matrix(all.distances.full.post.9)))) -> all.distances.melted.post.9
+as.tibble(subset(melt(as.matrix(all.distances.full.pre)))) -> all.distances.melted.pre
+
+summary(is.na(all.distances.melted.post.9$value))
+summary(is.na(all.distances.melted.pre$value))
+
+```
+
+```{r}
+# Now, create a three variables for all distances, they could be PCR replicates, BIOL replicates, or from the same site
+
+all.distances.melted.pre %>%
+  separate(., Var1, into = c("Time1","Location1","Replicate1"), sep="_") %>% 
+  separate(., Var2, into = c("Time2","Location2","Replicate2"), sep="_") %>% 
+  dplyr::select(Time1,Location1,Replicate1,Time2,Location2,Replicate2,value) %>% 
+  unite( Time1,Location1, col= "station1", remove=F) %>% 
+  unite( Time2,Location2, col= "station2", remove=F) %>% 
+  unite( Time1,Location1,Replicate1, col= "Sample1", remove=F) %>% 
+  unite( Time2,Location2,Replicate2, col= "Sample2", remove=F) %>% 
+  mutate(Distance.type = case_when(station1 == station2 ~ "Biol.replicates",
+                                   Time1 == Time2 ~"Same Collection Date",
+                                   Location1 == Location2 ~ "Same Site",
+                                      TRUE ~ "Different Time Different Site")) %>% 
+  dplyr::select(Sample1, Sample2, value , Distance.type) %>%
+  filter(Sample1 != Sample2) -> all.distances.to.plot.pre
+
+# Checking all went well
+sapply(all.distances.to.plot.pre, function(x) summary(is.na(x)))
+
+all.distances.to.plot.pre$Distance.type <- all.distances.to.plot.pre$Distance.type  %>% fct_relevel( "Biol.replicates", "Same Collection Date","Same Site","Different Time Different Site")
+
+  ggplot (all.distances.to.plot.pre , aes (fill = Distance.type, x = value,after_stat(density))) +
+  geom_histogram(stat = 'bin', alpha = 0.9, binwidth = 0.01) + #xlim(0, 1) +
+  facet_wrap( ~ Distance.type) +
+ labs (x = "Pairwise Dissimilarity", y = "Density" ,
+        fill = "Groups", title = "eDNA Pairwise Dissimilarity Pre Occ") +theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank())
+  
+```
+
+```{r}
+# Now, create a three variables for all distances, they could be PCR replicates, BIOL replicates, or from the same site
+
+all.distances.melted.post.9 %>%
+  separate(., Var1, into = c("Time1","Location1","Replicate1"), sep="_") %>% 
+  separate(., Var2, into = c("Time2","Location2","Replicate2"), sep="_") %>% 
+  dplyr::select(Time1,Location1,Replicate1,Time2,Location2,Replicate2,value) %>% 
+  unite( Time1,Location1, col= "station1", remove=F) %>% 
+  unite( Time2,Location2, col= "station2", remove=F) %>% 
+  unite( Time1,Location1,Replicate1, col= "Sample1", remove=F) %>% 
+  unite( Time2,Location2,Replicate2, col= "Sample2", remove=F) %>% 
+  mutate(Distance.type = case_when(station1 == station2 ~ "Biol.replicates",
+                                   Time1 == Time2 ~"Same Collection Date",
+                                   Location1 == Location2 ~ "Same Site",
+                                      TRUE ~ "Different Time Different Site")) %>% 
+  dplyr::select(Sample1, Sample2, value , Distance.type) %>%
+  filter(Sample1 != Sample2) -> all.distances.to.plot.post.9
+
+# Checking all went well
+sapply(all.distances.to.plot.post.9, function(x) summary(is.na(x)))
+
+all.distances.to.plot.post.9$Distance.type <- all.distances.to.plot.post.9$Distance.type  %>% fct_relevel( "Biol.replicates", "Same Collection Date","Same Site","Different Time Different Site")
+
+  ggplot (all.distances.to.plot.post.9 , aes (fill = Distance.type, x = value,after_stat(density))) +
+  geom_histogram(stat = 'bin', alpha = 0.9, binwidth = 0.01) + #xlim(0, 1) +
+  facet_wrap( ~ Distance.type) +
+ labs (x = "Pairwise Dissimilarity", y = "Density" ,
+        fill = "Groups", title = "eDNA Pairwise Dissimilarity Post Occ") +theme_bw() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank())
+  
+```
+
+#Code for merging ASV tables
+
+```{r}
+#Hashes Unique Species
+Hash.key %>% 
+  distinct(.,sum.taxonomy) -> hashes_unique
+
+hashes_unique$number <- row.names(hashes_unique)
+hashes_unique$number <- paste0("taxon_",hashes_unique$number)
+row.names(hashes_unique)<-hashes_unique$number
+
+Hash.key %>% 
+  left_join(hashes_unique, by="sum.taxonomy") -> Hash.key.updated
+
+head(Hash.key.updated)
+
+#Create Data List for merging taxon files
+
+
+head(Hash.key.updated)
+```
+
+#Pre Occupancy Merge, All PCR Tech Reps Separate Samples
+```{r}
+
+Hash.key.updated$number %>% unique() -> total_taxa
+
+ASV.nested$Step2.tibble[[1]] %>% 
+  mutate(miseq = ASV.nested$Miseq_run[[1]]) %>% 
+  mutate(seq_number=Hash) %>%
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  dplyr::group_by(number,sample) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  spread(., sample, nReads) %>% #convert to wide data format
+  replace(is.na(.), 0)  -> miu_pre
+miu_pre$number %>%  unique() -> miu_pre_taxa
+
+total_kept_taxa <- miu_pre_taxa %>% unique()
+
+miu_pre <- as.data.frame(miu_pre)
+row.names(miu_pre) <- miu_pre$number
+miu_pre %>% ungroup() %>% dplyr::select(-number) -> miu_pre
+
+dim(miu_pre)
+
+cbind(miu_pre) -> results_thesis
+vegan::wisconsin(results_thesis) ->results_thesis_2
+```
+
+```{r}
+Hash.key.updated.2 <- Hash.key.updated[!duplicated(Hash.key.updated$number), ]
+
+results_thesis$number <- rownames(results_thesis)
+
+results_thesis %>% 
+  left_join(Hash.key.updated.2, by="number") %>% 
+  dplyr::select(-number,-seq_number) -> results_thesis
+results_thesis$sum.taxonomy
+saveRDS(results_thesis,file="pre_occupancy_results_merged_runs_separate_read_counts.RDS")
+write_csv(results_thesis ,"ASV_pre_occ_sum_taxonomy_read_counts_runs_separate.csv")
+```
+
+```{r}
+
+Hash.key.updated.2 <- Hash.key.updated[!duplicated(Hash.key.updated$number), ]
+
+results_thesis_2$number <- rownames(results_thesis_2)
+
+results_thesis_2 %>% 
+  left_join(Hash.key.updated.2, by="number") %>% 
+  dplyr::select(-number,-seq_number) -> results_thesis_2
+
+saveRDS(results_thesis_2,file="pre_occupancy_results_merged_runs_separate_eDNA_index.RDS")
+write_csv(results_thesis_2 ,"ASV_pre_occ_sum_taxonomy_edna_index_runs_separate.csv")
+```
+
+#Post Occupancy Merge, All PCR Tech Reps Separate Samples
+```{r}
+Hash.key.updated$number %>% unique() -> total_taxa
+
+ASV.nested$Step3.tibble.9[[1]] %>% 
+  mutate(miseq = ASV.nested$Miseq_run[[1]]) %>% 
+  mutate(seq_number=Hash) %>%
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  dplyr::group_by(number,sample) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  spread(., sample, nReads) %>% #convert to wide data format
+  replace(is.na(.), 0)  -> miu_pre
+miu_pre$number %>%  unique() -> miu_pre_taxa
+
+total_kept_taxa <- miu_pre_taxa %>% unique()
+
+miu_pre <- as.data.frame(miu_pre)
+row.names(miu_pre) <- miu_pre$number
+miu_pre %>% ungroup() %>% dplyr::select(-number) -> miu_pre
+
+dim(miu_pre)
+
+#first, we want to create proportions by dividing by the rowsums:
+#we could do this with sweep() or mutate_all() or other ways, but using vegan:
+
+miu_pre_prop <- decostand(miu_pre, method = "total", MARGIN = 2)
+
+#second, we want to ask how the proprortion for each species has changed across columns (samples). 
+#We do this by scaling everything to the max observed in each row. 
+
+#to do this WITHIN a dataset, we could just do (again, using vegan):
+miu_pre_prop_index <- decostand(miu_pre_prop, method = "max", MARGIN = 1)
+
+#this gives us an index between 0 and 1 for each species in each dataset.  
+
+#But if we want to combine datasets, this second step has to happen in the combined dataset, so it all gets scaled to 0-1.  
+#easy enough:
+
+combined_index <- decostand(miu_pre_prop_index, method = "max", MARGIN = 1)
+#now both datasets are combined, on a common, comparable scale.
+```
+
+```{r}
+
+results_calcofi_reads = cbind(miu_pre)
+
+Hash.key.updated.2 <- Hash.key.updated[!duplicated(Hash.key.updated$number), ]
+
+results_calcofi_reads$number <- rownames(results_calcofi_reads)
+
+results_calcofi_reads %>% 
+  left_join(Hash.key.updated.2, by="number") %>% 
+  dplyr::select(-number,-seq_number) -> results_calcofi_reads
+results_calcofi_reads$sum.taxonomy
+saveRDS(results_calcofi_reads,file="post_occupancy_results_merged_runs_separate_read_counts.RDS")
+write_csv(results_calcofi_reads ,"ASV_post_occ_sum_taxonomy_read_counts_runs_separate.csv")
+```
+
+
+```{r}
+
+Hash.key.updated.2 <- Hash.key.updated[!duplicated(Hash.key.updated$number), ]
+
+combined_index$number <- rownames(combined_index)
+
+combined_index %>% 
+  left_join(Hash.key.updated.2, by="number") %>% 
+  dplyr::select(-number,-seq_number) -> combined_index
+combined_index$sum.taxonomy
+saveRDS(combined_index,file="post_occupancy_results_merged_runs_separate_eDNA_index.RDS")
+write_csv(combined_index ,"ASV_post_occ_sum_taxonomy_edna_index_runs_separate.csv")
+
+```
+
+#Pre Occupancy Merge by Site
+```{r}
+
+ASV.nested %>% 
+  dplyr::select(Step2.tibble) %>% 
+  unnest(Step2.tibble) %>% 
+  mutate(seq_number=Hash) %>%
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  spread(., Site, nReads) %>% #convert to wide data format
+    ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> pre_wide_reads
+
+saveRDS(pre_wide_reads,file="pre_occ_site_averaged_sum.taxonomy_reads.RDS")
+write_csv(pre_wide_reads ,"pre_occ_site_averaged_sum.taxonomy_reads.csv")
+
+ASV.nested %>% 
+  dplyr::select(Step2.tibble) %>% 
+  unnest(Step2.tibble) %>% 
+  mutate(seq_number=Hash) %>%
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(Site) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(Normalized.reads=mean(Normalized.reads)) %>% 
+  spread(., Site, Normalized.reads) %>% #convert to wide data format
+    ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> pre_wide
+
+ASV.nested %>% 
+  dplyr::select(Step2.tibble) %>% 
+  unnest(Step2.tibble) %>% 
+  mutate(seq_number=Hash) %>%
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(Site) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(Normalized.reads=sd(Normalized.reads)) %>% 
+  spread(., Site, Normalized.reads) %>% #convert to wide data format
+      ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> pre_wide_sd
+list(pre_wide,pre_wide_sd) -> pre_wide_data
+
+saveRDS(pre_wide_data,file="pre_occ_site_averaged_sum.taxonomy_e_index.RDS")
+write_csv(pre_wide,"pre_occ_site_averaged_sum.taxonomy_e_index.csv")
+
+```
+
+#Post Occupancy 9 Merge by Site
+```{r}
+
+ASV.nested %>% 
+  dplyr::select(Step3.tibble.9) %>% 
+  unnest(Step3.tibble.9) %>% 
+  mutate(seq_number=Hash) %>%
+  select(-sum.taxonomy) %>% 
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(nReads=sum(nReads)) %>% 
+  spread(., Site, nReads) %>% #convert to wide data format
+      ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> occ_9_wide_reads
+
+saveRDS(occ_9_wide_reads,file="post_occ_9_site_averaged_sum.taxonomy_reads.RDS")
+write_csv(occ_9_wide_reads ,"post_occ_9_site_averaged_sum.taxonomy_reads.csv")
+
+ASV.nested %>% 
+  dplyr::select(Step3.tibble.9) %>% 
+  unnest(Step3.tibble.9) %>% 
+  mutate(seq_number=Hash) %>%
+  select(-sum.taxonomy) %>% 
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(Site) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(Normalized.reads=mean(Normalized.reads)) %>% 
+  spread(., Site, Normalized.reads) %>% #convert to wide data format
+        ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> occ_9_wide
+
+ASV.nested %>% 
+  dplyr::select(Step3.tibble.9) %>% 
+  unnest(Step3.tibble.9) %>% 
+  mutate(seq_number=Hash) %>%
+  select(-sum.taxonomy) %>% 
+  left_join(Hash.key.updated, by="seq_number") %>% 
+  left_join(metadata, by=c("sample"="New_name")) %>% 
+  unite(Collected_Date,Location, col="Site") %>% 
+  ungroup() %>% 
+  dplyr::group_by(Site) %>%
+  mutate (Tot = sum(nReads),
+          Row.sums = nReads / Tot) %>% 
+  dplyr::group_by (sum.taxonomy) %>%
+  mutate (Colmax = max (Row.sums),
+          Normalized.reads = Row.sums / Colmax) %>% 
+  dplyr::group_by(sum.taxonomy,Site) %>%
+  dplyr::summarise(Normalized.reads=sd(Normalized.reads)) %>% 
+  spread(., Site, Normalized.reads) %>% #convert to wide data format
+        ungroup() %>% as.data.frame() %>% 
+  replace(is.na(.), 0)  -> occ_9_wide_sd
+list(occ_9_wide,occ_9_wide_sd) -> post_occ_9_data
+
+saveRDS(post_occ_9_data,file="post_occ_9_site_averaged_sum.taxonomy_e_index.RDS")
+write_csv(occ_9_wide,"post_occ_9_site_averaged_sum.taxonomy_e_index.csv")
+```
