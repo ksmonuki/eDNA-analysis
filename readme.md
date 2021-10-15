@@ -18,12 +18,12 @@ This page is dedicated to hosting the code for the accepted manuscript.
 
 Included on this page is: 
 
-1. #### Scripts used to conduct analyses
+#### 1. Scripts used to conduct analyses
 i. *decontam/keira_decontamination_updated_080520.Rmd* Code to decontaminate the taxonomic tables 
 ii. *decontam/SOM_keira_08062020.R* Code to run the site occupancy model
 iii. *eDNA_analysis_code.Rmd* Code to run downstream alphadiversity and betadiversity analyses
 
-2. #### Data
+#### 2. Data
 
 The data is available on [Dryad](https://doi.org/10.5068/D18H47)
 
