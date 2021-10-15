@@ -1,0 +1,3451 @@
+---
+title: "eDNA Variability Across Depth, Horizontal Space, and Time"
+author: "Keira Monuki and Zack Gold"
+date: "10/15/21"
+output: html_document
+indent: true
+header-includes:
+  - \setlength{\parindent}{4em}
+  - \setlength{\parskip}{0em}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Analyses
+Decontamination code is on the script keira_decontamination_updated_080520.Rmd. This RMarkdown has the downstream analyses of the decontaminated data. 
+
+#####Load Libraries  
+```{r load libraries, results="hide", warning=FALSE, include=FALSE, message = FALSE}
+library(ape)
+library(ampvis2)
+library(biomformat)
+library(colorspace)
+library(cluster)
+library(dendextend)
+library(dplyr)
+library(gradientForest) #gradientForest version 0.1-17
+library(extendedForest) #extendedForest version 1.6.1
+library(grid)
+library(gridExtra)
+library(gridBase)
+library(ggfortify)
+library(devtools)
+library(ggbiplot)
+library(ggrepel)
+library(ggplot2)
+library(knitr)
+library(devtools)
+library(multcompView)
+library(optparse)
+library(phyloseq)
+library(proxy)
+library(plotly)
+library(readr)
+library(RColorBrewer)
+library(reshape2)
+library(ranacapa) 
+library(scales)
+library(tibble)
+library(tidyverse)
+library(treemapify) 
+library(wesanderson) 
+library(vegan) #vegan version 2.5-6
+
+```
+
+
+#####Load Data Sets  
+```{r Load Data Sets}
+
+#Set Local folder to save output files
+Local_folder <- "/Users/keiramonuki/Documents/Barber_Lab"
+
+#Set Working Directory to Local Folder path
+setwd("/Users/keiramonuki/Documents/Barber_Lab")
+
+#Paths to Files
+
+##Metadata Table
+input_meta_path <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_8.7.20.txt"
+
+
+#Load in Metadata Table
+metadata <- read.table(input_meta_path, header = 1, sep = "\t", stringsAsFactors = F)
+
+#Load eDNA index data (post occupancy)
+
+ASV.table <- readRDS(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/post_occupancy_results_merged_runs_separate_eDNA_index.RDS")
+
+
+ASV.summary <- readRDS(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/ASV.summary_post_occ.RDS")
+
+```
+
+
+```{r Review Metadata File}
+
+#Review Metadata File
+head(metadata)
+
+```
+
+```{r Remove Control Samples}
+
+metadata %>% 
+  filter(Sample_control == "SAMPLE") -> metadata
+
+```
+
+```{r Create Phyloseq Object}
+
+#Convert the data into a phyloseq object
+physeq_obj <- convert_anacapa_to_phyloseq(ASV.table, metadata)
+
+#Remove unassigned taxa and known contaminants (e.g. land mammals)
+badTaxa = c("Unassigned", "Chordata;Actinopteri;;;;","Chordata;Mammalia;Primates;Hominidae;Homo;Homo sapiens", "Chordata;Mammalia;;Bovidae;Bos;Bos taurus", "Chordata;Actinopteri;Cypriniformes;Cyprinidae;Ctenopharyngodon;Ctenopharyngodon idella", "Chordata;Aves;Galliformes;Phasianidae;Meleagris;Meleagris gallopavo", "Chordata;Mammalia;Primates;Hominidae;Pan;Pan paniscus", "Chordata;Mammalia;NA;Bovidae;Bison;Bison bonasus", "Chordata;Mammalia;NA;Suidae;Sus;Sus salvanius", "Chordata;Mammalia;Primates;Hominidae;Gorilla;Gorilla gorilla", "Chordata;Mammalia;Carnivora;Canidae;Canis;Canis lupus", "Chordata;Mammalia;Artiodactyla;Bovidae;Bison;Bison bison", "Chordata;Mammalia;Artiodactyla;Suidae;Sus;Sus scrofa", "Chordata;Aves;Galliformes;Phasianidae;Gallus;Gallus gallus", "Chordata;Mammalia;Primates;Cercopithecidae;Macaca;Macaca fascicularis")  
+goodTaxa <- setdiff(taxa_names(physeq_obj), badTaxa)
+physeq_obj <- prune_taxa(goodTaxa, physeq_obj)
+
+physeq_obj
+
+```
+There are a total of 55 samples comprised of 84 taxa with 6 taxonomic ranks.
+<br />
+We created a summary table for the total number of phyla, classes, orders, families, genera and species after site occupancy modeling.
+<br />
+
+```{r Taxonomic Summary Table}
+
+#Separate and count the taxonomic levels
+Phylum <- length(get_taxa_unique(physeq_obj, "Phylum"))
+Phylum <- as.data.frame(Phylum)
+Class <- length(get_taxa_unique(physeq_obj, "Class"))
+Class <- as.data.frame(Class)
+Order <- length(get_taxa_unique(physeq_obj, "Order"))-2
+Order <- as.data.frame(Order)
+Family <- length(get_taxa_unique(physeq_obj, "Family"))-1
+Family <- as.data.frame(Family)
+Genus <- length(get_taxa_unique(physeq_obj, "Genus"))-1
+Genus <- as.data.frame(Genus)
+Species <- length(get_taxa_unique(physeq_obj, "Species"))-1
+Species <- as.data.frame(Species)
+
+taxonomy_summary_table <- bind_cols(Phylum,Class,Order,Family,Genus,Species)
+
+rownames(taxonomy_summary_table) <- "Unique"
+
+taxonomy_summary_table
+
+```
+
+Overall we have 73 species from 71 genera, 48 families, 26 orders and 4 classes. <br />
+
+Next we will generate a list of observed species. 
+```{r Observed Species List}
+
+#List of All Species Observed
+species_list <- as.data.frame (get_taxa_unique(physeq_obj, "Species"))
+names(species_list) <- "Species"
+kable(species_list, caption = "Species Detected using eDNA")
+
+```
+
+Of the 73 species, three are non-native: Two of the non-native species can be attributed to contamination from other project utilizing the same lab space (*Stegastes nigricans* and *Epinephelus merra*). We will manually remove those ASVs from the dataset. The third species is *Campylorhynchus zonatus*, which is likely *C. brunneicapillus*, a sister taxa native to California. We will leave the *C. zonatus* ASVs in the dataset. 
+
+```{r Remove Non-Native Species}
+
+#Remove known non-native taxa
+badTaxa.nonnative = c("Chordata;Actinopteri;;Pomacentridae;Stegastes;Stegastes nigricans", "Chordata;Actinopteri;Perciformes;Serranidae;Epinephelus;Epinephelus merra") 
+#
+goodTaxa.nonnative <- setdiff(taxa_names(physeq_obj), badTaxa.nonnative)
+physeq_obj <- prune_taxa(goodTaxa.nonnative, physeq_obj)
+
+```
+
+We now have 82 taxa across 55 samples. After creating the phyloseq object, we will begin the analyses. First, we will create a color palette for data visualization.
+
+```{r, Color Pallettes , include=FALSE}
+
+# Color Generation For Plots Using the Wes Anderson color package
+col3.gr <- wes_palette(name = "Darjeeling1", n=5, type="discrete")
+col2.gr <- wes_palette(name = "Darjeeling2", n=5, type="discrete")
+col1.gr <- wes_palette(name = "GrandBudapest1", n=4, type="discrete")
+col4.gr <- wes_palette(name = "Royal1", n=4, type="discrete")
+col5.gr <- wes_palette(name = "GrandBudapest2", n=4, type="discrete")
+col6.gr <- wes_palette(name = "Chevalier1", n=4, type="discrete")
+col7.gr <- wes_palette(name = "Moonrise3", n=4, type="discrete")
+col8.gr <- wes_palette(name = "IsleofDogs1", n=4, type="discrete")
+col9.gr <- wes_palette(name = "IsleofDogs2", n=4, type="discrete")
+
+col_mpa <- c(col3.gr[3],col3.gr[1], col3.gr[2], col2.gr[2])
+
+#Rainbow Palette used for Depth Station visualization
+col.great <- c(col3.gr[1], col3.gr[3], col7.gr[2], col3.gr[2], col2.gr[2], col8.gr[1])
+
+```
+
+Analyses are divided into betadiversity analyses using eDNA Index scores and alphadiversity analyses using eDNA read counts.
+
+Betadiversity Statistics
+
+We will analyze the depth gradient using eDNA Index scores from only the offshore stations (excluding shore scores). The RDS file of the ASVs we used to create the phyloseq object contains the eDNA Index scores, a metric of eDNA abundance. We will compare communities using Bray-Curtis dissimilarity.
+
+```{r Format for Vegan Functions}
+
+#Generate vegan formatted data table
+sampledf <- data.frame(sample_data(physeq_obj))
+carnivore_rel_abun<- vegan_otu(physeq_obj)
+
+#Create the Bray-Curtis dissimilarity matrix
+d_carn <- vegdist(carnivore_rel_abun, method="bray") 
+
+```
+
+Now we will remove the shore station values from the data frame. 
+
+```{r Remove Shore station values}
+#Remove shore values from metadata data frame 
+sampledf_noshore <- sampledf %>% 
+  filter(Depth_m >= 0)
+
+#Remove shore values from otu relative abundance data
+edna_index_values <- as.data.frame(carnivore_rel_abun)
+edna_index_values <- rownames_to_column(edna_index_values, "Sample_name")
+  
+edna_index_values <- sampledf %>% 
+  left_join(edna_index_values)
+
+edna_index_values <- edna_index_values %>% 
+  filter(Depth_m >= 0) %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+  
+rownames(edna_index_values) <- edna_index_values[,1] 
+
+edna_index_values <- edna_index_values %>% 
+  select(-Sample_name)
+
+```
+
+We will run the PERMANOVA using the Bray-Curtis dissimilarity and depth, collected date, and replicate as the variables.
+
+```{r Run PERMANOVA}
+adonis(edna_index_values ~ sampledf_noshore$Depth_m + sampledf_noshore$Collected_Date + sampledf_noshore$Replicate, distance = "bray", permutations = 999)
+
+```
+
+Sample depth (p=0.001) and collected date (p=0.001) were both statistically significant. We will then run a pairwise PERMANOVA to examine which stations differed significantly in community composition. 
+<br />
+``` {r Pairwise Permanova}
+
+#Pairwise Permanova
+pairwise.adonis <- function(x,factors, sim.function = 'vegdist', sim.method = 'bray', p.adjust.m ='bonferroni')
+
+
+{
+  library(vegan)
+  
+  co = combn(unique(as.character(factors)),2)
+  pairs = c()
+  F.Model =c()
+  R2 = c()
+  p.value = c()
+  
+  for(elem in 1:ncol(co)){
+    if(sim.function == 'daisy'){
+      library(cluster); x1 = daisy(x[factors %in% c(co[1,elem],co[2,elem]),],metric=sim.method)
+    } else{x1 = vegdist(x[factors %in% c(co[1,elem],co[2,elem]),],method=sim.method)}
+    
+    ad = adonis(x[factors %in% c(co[1,elem],co[2,elem]),] ~ factors[factors %in% c(co[1,elem],co[2,elem])], method = "bray"); #edited by Zack Gold 06042019
+    pairs = c(pairs,paste(co[1,elem],'vs',co[2,elem]));
+    F.Model =c(F.Model,ad$aov.tab[1,4]);
+    R2 = c(R2,ad$aov.tab[1,5]);
+    p.value = c(p.value,ad$aov.tab[1,6])
+  }
+  p.adjusted = p.adjust(p.value,method=p.adjust.m)
+  sig = c(rep('',length(p.adjusted)))
+  sig[p.adjusted <= 0.05] <-'.'
+  sig[p.adjusted <= 0.01] <-'*'
+  sig[p.adjusted <= 0.001] <-'**'
+  sig[p.adjusted <= 0.0001] <-'***'
+  
+  pairw.res = data.frame(pairs,F.Model,R2,p.value,p.adjusted,sig)
+  print("Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1")
+  return(pairw.res)
+  
+} 
+
+
+
+#Pairwise PERMANOVA across horizontal space
+pairwise.adonis(edna_index_values, sampledf_noshore$Depth_m)
+
+```
+
+The 0-10, 0-9, 0-5, 10-1 and 1-9 stations are most significantly different from one another (p=0.01). The 10-5 (p=0.05) and 1-5 (p=0.02) stations are moderately significantly different from one another. The 0-1 (p=1), 10-9 (p=1) and 5-9 (p=0.13) are not different from each other. 
+<br />
+
+We conducted a Betadisper test to examine the homogeneity of group dispersions across depth.
+<br />
+```{r betadisper depth}
+
+#Create the Bray-Curtis dissimilarity matrix for offshore abundances
+d_carn_noshore <- vegdist(edna_index_values, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_noshore, getElement(sampledf_noshore, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_noshore, getElement(sampledf_noshore, "Location"))))
+
+```
+
+Only the 1m-5m stations are significantly different in their dispersions (p=0.0167). <br />
+
+We will then calculate the apportioned variance and determine how each environmental variable contributes to the variation in eDNA signatures.
+
+```{r Apportioned variance, results="hide",warning=FALSE}
+
+#Apportioning variance: OTU counts
+OTU.count.adonis <- adonis(edna_index_values ~ sampledf_noshore$Depth_m + sampledf_noshore$Collected_Date + sampledf_noshore$Replicate)$aov.tab
+OTU.count.adonis
+
+#Set up for Q Plot
+q<-as.data.frame(OTU.count.adonis)
+row.names(q)<-c("Depth Station", "Collected Date", "Replicate", "Residuals", "Total") #must match names correctly
+q<-data.frame(row.names(q), q)
+names(q)[1]<-"Level"
+q<-q[-which(row.names(q)=="Total"),]
+q$Level<-paste(q$Level, "\n",
+               round(q$R2,2), " (", q$Pr..F., ")", 
+               sep="")
+#Plot Figure 
+q0.plot<-ggplot(q, aes(area = R2, label=Level))+
+  geom_treemap(fill=brewer.pal(4, "Blues")[1:4], color=1, alpha=.8)+
+  geom_treemap_text(colour = "black", place = "centre", grow = FALSE, size=20)+
+  ggtitle("Apportioned Variance")+
+  theme(plot.background = element_blank())+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+q0.plot
+
+```
+
+The apportioned variance still shows a large amount of unexplained variance. Depth station accounts for 16% of the variation, Collected date accounts for 14% of the variation and Replicate accounts for 3% of the variation.
+<br />
+
+We will now run a Mantel Test and visualize the results on an NMDS. 
+
+```{r Mantel Test}
+
+#Mantel Test
+#use edna_index_values as data frame
+dist.edna_index_values <- vegdist(edna_index_values, method = "bray")
+dist.depth <- vegdist(sampledf_noshore$Depth_m, method = "euclidean")
+mantel_test <- mantel(dist.edna_index_values, dist.depth, method = "spearman", permutations = 999)
+mantel_test
+
+```
+
+The Mantel test gives r=0.4045 with p=0.001. We will now visualize community similarity across depth station using an NMDS. <br />
+
+```{r NMDS}
+
+#Plot NMDS
+edna_index_values <- as.matrix(edna_index_values)
+nmds <- metaMDS(edna_index_values, distance = "bray")
+nmds #stress = 0.17825
+
+data.scores <- as.data.frame(scores(nmds))
+
+data.scores$Depth <- sampledf_noshore$Depth_m
+data.scores
+
+data.scores %>% 
+  rownames_to_column("ID") %>% 
+  separate(ID, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_")) %>% 
+  select(-Station, -Replicate, -miu_elas) -> data.scores
+  
+
+nmds_all <- ggplot(data.scores, aes(x = NMDS1, NMDS2)) +
+  geom_point(size = 5, aes(colour = Depth, shape = Day)) +
+    theme(axis.text.y = element_text(colour = "black", size = 15), 
+    axis.text.x = element_text(colour = "black", size = 15), 
+    legend.text = element_text(size = 15, colour ="black"), 
+    legend.position = "right", axis.title.y = element_text(face = "bold", size = 20), 
+    axis.title.x= element_text(face = "bold", size = 20, colour = "black"), 
+    legend.title = element_text(size = 20, colour = "black", face = "bold"), 
+    panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+    legend.key=element_blank()) +
+  scale_color_gradient2(low ="plum4", mid = "lightgoldenrod2", high = "springgreen3", midpoint = 5, space = "Lab", guide = "colourbar", aesthetics = "colour")
+
+nmds_all
+
+```
+Note: the Depth legend direction (10 -> 0) was flipped (0 -> 10) after figure export. 
+
+Nearshore vs. surf zone analyses
+
+We will now assess community differences across horizontal space (nearshore vs. surf zone). We will compare specifically the shore and 1 m stations, since these samples were collected at comparable depths across horizontal space.
+
+```{r PERMANOVA with shore and 1m stations}
+
+horizontal_values <- as.data.frame(carnivore_rel_abun)
+horizontal_values <- rownames_to_column(horizontal_values, "Sample_name")
+  
+horizontal_values <- sampledf %>% 
+  left_join(horizontal_values)
+
+
+horizontal_values <- horizontal_values %>% 
+  filter(Location == "SHR" | Location == "1m") %>% 
+  select(-Collected_Date, -Survey_Site, -Depth_m, -Location, -Replicate, -Collected_time, -Collector, -Start_volume_L, -Volume_filtered, -Time_filtered, -Squeezed, -High_Tide, -Swell_height_ft, -Swell_period_s, -Surf_height_ft, -Sample_control, -Off_On)
+
+  
+rownames(horizontal_values) <- horizontal_values[,1] 
+
+horizontal_values <- horizontal_values %>% 
+  select(-Sample_name)
+
+
+sampledf_shr_1m<- sampledf %>% 
+  filter(Location == "SHR" | Location == "1m")
+
+adonis(horizontal_values ~ sampledf_shr_1m$Location,  distance = "bray", permutations = 999)
+adonis(horizontal_values ~ sampledf_shr_1m$Location + sampledf_shr_1m$Replicate + sampledf_shr_1m$Collected_Date,  distance = "bray", permutations = 999)
+
+```
+
+The communities between the shore and 1 m station differed significantly (p=0.001). We will also assess group dispersions. 
+
+```{r shr vs. 1m group dispersion}
+
+#Create the Bray-Curtis dissimilarity matrix for offshore abundances
+d_carn_shr_1m <- vegdist(horizontal_values, method="bray") 
+
+#Homogeneity of dispersions across depth
+betadisper(d_carn_shr_1m , getElement(sampledf_shr_1m, "Location"))
+broom::tidy(TukeyHSD(betadisper(d_carn_shr_1m , getElement(sampledf_shr_1m, "Location"))))
+```
+Group dispersions differed between the shore and 1 m station (p=0.002) <br />
+
+
+We will now run a gradientForest model with the offshore stations. 
+
+```{r GradientForest Offshore, results="hide",warning=FALSE}
+
+#Remake Indexed OTU table
+ind_val <- as.data.frame(edna_index_values)
+
+#Make Numeric
+ind_val <- sapply(ind_val, as.numeric)
+
+#Re apply row and col names
+row.names(ind_val) <- row.names(edna_index_values)
+colnames(ind_val) <- colnames(edna_index_values)
+
+#Rename Column Names
+species_names <- colnames(edna_index_values)
+easy_name <- vector(length=length(species_names))
+
+for (i in 1:length(easy_name)) {
+  easy_name[i] <- paste0("species", i)
+}
+
+#Store Name Pairs
+species_list <- as.list(easy_name,species_names)
+names(species_names) <- easy_name
+
+#input and format metadata
+input_meta_path2 <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_gradientForest_offshore_4.1.20.txt"
+metadata2 <- read.table(input_meta_path2, header = 1, sep = "\t", stringsAsFactors = F)
+metadata2 <- as.data.frame(metadata2)
+row_namers <- metadata2$Sample_name
+metadata2 <- sapply(metadata2, as.numeric)
+row.names(metadata2) <- row_namers
+metadata2 <- metadata2[,2:5]
+metadata2 <- metadata2[,-3]
+
+datDF_carn<-merge(metadata2,ind_val,by="row.names")
+g <- length(datDF_carn)
+row_namers2 <- row.names(ind_val)
+datDF_carn <- sapply(datDF_carn, as.numeric)
+datDF_carn <- datDF_carn[,2:g]
+datDF_carn <- as.data.frame(datDF_carn)
+row.names(datDF_carn) <- row_namers2 
+
+########################################
+#       GRADIENT FOREST OFFSHORE       #
+########################################
+
+eDNA_gradFor<-gradientForest(datDF_carn,
+                             predictor.vars = colnames(metadata2), 
+                             response.vars = colnames(ind_val),
+                             ntree = 500, transform = NULL, compact = F,
+                             corr.threshold = 0.5, trace=T)
+
+```
+
+After creating the model, we will plot the overall importance of the environmental variables and the performance of each species. 
+
+```{r Overall Importance of Environmental Variables}
+
+#Plot Overall Importance of Environmental Variables
+importance(eDNA_gradFor)
+
+plot(eDNA_gradFor,plot.type="Overall.Importance", col = c(col_mpa), cex.axis = 0.8)
+
+```
+The overall importance of the variables are as follows: R2 weighted importance is Depth_m (0.110997987), Collected_Date (0.109528793), Replicate (0.006041575). Accuracy importance is Depth_m (0.01017388), Collected_Date (0.009626591), Replicate (-0.001568542)
+
+<br />
+
+```{r Species performances}
+
+#R^2 fit for each species
+plot(eDNA_gradFor, plot.type = "Performance", show.names = F, horizontal = F,
+     cex.axis = 1, cex.labels = 0.7, line = 2.5)
+
+```
+
+
+```{r Sort species by performance}
+
+sort(eDNA_gradFor$result, decreasing=T) -> sort_species
+sort_species[1:14]
+
+```
+
+There are 14 species with performance values above 0.35, identified using the broken stick method. We will now plot the depth distributions for these 14 top performing species. We will also run ANOVA to assess the interaction between the sampling station and day to assess if the species distributions across stations change across sampling days (Note: the qqPlot function relies on the car package). 
+
+Species 1 (*Umbrina roncador*)
+
+```{r Species 1}
+#Umbrina roncador (sandy bottom)
+UmbRo <- sort_species[1]
+GoodUmbRo = names(UmbRo)
+BadUmbRo <- setdiff(taxa_names(physeq_obj), GoodUmbRo)
+Umb_Ro <- prune_taxa(GoodUmbRo, physeq_obj)
+taxa_names(Umb_Ro)
+vegan_otu(Umb_Ro) -> umb_ro_table
+umb_ro_table <- as.data.frame(umb_ro_table)
+
+```
+
+```{r Species 1 day:depth interaction}
+library(car)
+umb_ro_table %>%
+  rename(Species = colnames(umb_ro_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> umb_ro_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = umb_ro_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = umb_ro_table)) -> aov_umbro
+aov_umbro
+
+```
+
+The Day:Station p-value is reported in S7 Table in the Supplemental Materials.
+
+```{r Species 1 depth distribution}
+umb_ro_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_depth
+umb_ro_depth %>% 
+  subset(Station != "SHR") -> umb_ro_depth
+ggplot(umb_ro_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=15, face = "italic"),
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("U. roncador") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro
+#Reorder stations
+neworder = c("0m", "1m", "5m", "9m", "10m")
+umbro$data$Station <- factor(umbro$data$Station, levels=neworder)
+umbro
+
+```
+
+```{r Species 1 day distribution}
+umb_ro_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_day
+
+umb_ro_day
+```
+
+Species 2 (*Paralabrax nebulifer*)
+
+```{r Species 2}
+#Paralabrax nebulifer (rocky reef)
+ParNe <- sort_species[2]
+GoodParNe = names(ParNe)
+BadParNe <- setdiff(taxa_names(physeq_obj), GoodParNe)
+Par_Ne <- prune_taxa(GoodParNe, physeq_obj)
+taxa_names(Par_Ne)
+vegan_otu(Par_Ne) -> par_ne_table
+par_ne_table <- as.data.frame(par_ne_table)
+```
+
+```{r Species 2 day:depth}
+par_ne_table %>%
+  rename(Species = colnames(par_ne_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> par_ne_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_ne_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_ne_table)) -> aov_parne
+aov_parne
+
+```
+
+
+```{r Species 2 depth distribution}
+par_ne_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_depth
+par_ne_depth %>% 
+  subset(Station != "SHR") -> par_ne_depth
+ggplot(par_ne_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("P. nebulifer") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne
+#Reorder stations
+parne$data$Station <- factor(parne$data$Station, levels=neworder)
+parne
+```
+
+```{r Species 2 day distribution}
+par_ne_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_day
+par_ne_day
+
+```
+
+Species 3 (*Engraulis mordax*)
+
+```{r Species 3}
+#Engraulis mordax (pelagic)
+EngMo <- sort_species[3]
+GoodEngMo = names(EngMo)
+BadEngMo <- setdiff(taxa_names(physeq_obj), GoodEngMo)
+Eng_Mo <- prune_taxa(GoodEngMo, physeq_obj)
+taxa_names(Eng_Mo)
+vegan_otu(Eng_Mo) -> eng_mo_table
+eng_mo_table <- as.data.frame(eng_mo_table)
+```
+
+```{r Species 3 day:depth}
+eng_mo_table %>%
+  rename(Species = colnames(eng_mo_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> eng_mo_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = eng_mo_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = eng_mo_table)) -> aov_engmo
+aov_engmo
+
+```
+
+
+```{r Species 3 depth distribution}
+eng_mo_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_depth
+eng_mo_depth %>% 
+  subset(Station != "SHR") -> eng_mo_depth
+ggplot(eng_mo_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("E. mordax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> engmo
+#Reorder stations
+engmo$data$Station <- factor(engmo$data$Station, levels=neworder)
+engmo
+```
+
+```{r Species 3 day distribution}
+eng_mo_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> eng_mo_day
+eng_mo_day
+
+```
+
+Species 4 (*Sardinops sagax*)
+
+```{r Species 4}
+#Sardinops sagax (pelagic)
+SarSa <- sort_species[4]
+GoodSarSa = names(SarSa)
+BadSarSa <- setdiff(taxa_names(physeq_obj), GoodSarSa)
+Sar_Sa<- prune_taxa(GoodSarSa, physeq_obj)
+taxa_names(Sar_Sa)
+vegan_otu(Sar_Sa) -> sar_sa_table
+sar_sa_table <- as.data.frame(sar_sa_table)
+```
+
+```{r Species 4 day:depth interaction}
+sar_sa_table %>%
+  rename(Species = colnames(sar_sa_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sar_sa_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sar_sa_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sar_sa_table)) -> aov_sarsa
+aov_sarsa
+
+```
+
+
+```{r Species 4 depth distribution}
+sar_sa_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_depth
+sar_sa_depth %>% 
+  subset(Station != "SHR") -> sar_sa_depth
+ggplot(sar_sa_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(), panel.grid.minor.x=element_blank(),
+        panel.grid.major.y=element_blank(),
+        panel.grid.major.x=element_blank(), 
+        axis.text.x = element_text(angle = 90, hjust = 1), axis.title = element_text(size=15), 
+        plot.title = element_text(size=15, face = "italic"),
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("S. sagax") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sarsa
+#Reorder stations
+neworder = c("0m", "1m", "5m", "9m", "10m")
+sarsa$data$Station <- factor(sarsa$data$Station, levels=neworder)
+sarsa
+```
+
+```{r Species 4 day distribution}
+sar_sa_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_sa_day
+sar_sa_day
+
+```
+
+Species 5 (*Paralabrax clathratus*)
+
+```{r Species 5}
+#Paralabrax clathratus (rocky reef)
+ParCl <- sort_species[5]
+GoodParCl = names(ParCl)
+BadParCl <- setdiff(taxa_names(physeq_obj), GoodParCl)
+Par_Cl <- prune_taxa(GoodParCl, physeq_obj)
+taxa_names(Par_Cl)
+vegan_otu(Par_Cl) -> par_cl_table
+par_cl_table <- as.data.frame(par_cl_table)
+```
+
+```{r Species 5 day:depth}
+par_cl_table %>%
+  rename(Species = colnames(par_cl_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas)  -> par_cl_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_cl_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_cl_table)) -> aov_parcl
+aov_parcl
+
+```
+
+
+```{r Species 5 depth distribution}
+par_cl_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_depth
+par_cl_depth %>% 
+  subset(Station != "SHR") -> par_cl_depth
+ggplot(par_cl_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("P. clathratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl
+#Reorder stations
+parcl$data$Station <- factor(parcl$data$Station, levels=neworder)
+parcl
+
+```
+
+```{r Species 5 day distribution}
+par_cl_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_day
+par_cl_day
+
+```
+
+Species 6 (*Menticirrhus undulatus*)
+
+```{r Species 6}
+#Menticirrhus undulatus (sandy bottom)
+MenUn<- sort_species[6]
+GoodMenUn = names(MenUn)
+BadMenUn <- setdiff(taxa_names(physeq_obj), GoodMenUn)
+Men_Un <- prune_taxa(GoodMenUn, physeq_obj)
+taxa_names(Men_Un)
+vegan_otu(Men_Un) -> men_un_table
+men_un_table <- as.data.frame(men_un_table)
+```
+
+```{r Species 6 day:depth}
+men_un_table %>%
+  rename(Species = colnames(men_un_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> men_un_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = men_un_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = men_un_table)) -> aov_menun
+aov_menun
+```
+
+```{r Species 6 depth distribution}
+men_un_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_depth
+men_un_depth %>% 
+  subset(Station != "SHR") -> men_un_depth
+ggplot(men_un_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("M. undulatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun
+#Reorder stations
+menun$data$Station <- factor(menun$data$Station, levels=neworder)
+menun
+```
+
+``` {r Species 6 day distribution}
+men_un_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_day
+men_un_day
+```
+
+Species 7 (*Citharichthys stigmaeus*)
+
+```{r Species 7}
+#Citharichthys stigmaeus (sandy bottom)
+CitSt <- sort_species[7]
+GoodCitSt = names(CitSt)
+BadCitSt <- setdiff(taxa_names(physeq_obj), GoodCitSt)
+Cit_St <- prune_taxa(GoodCitSt, physeq_obj)
+taxa_names(Cit_St)
+vegan_otu(Cit_St) -> cit_st_table
+cit_st_table <- as.data.frame(cit_st_table)
+```
+
+```{r Species 7 depth:day}
+cit_st_table %>%
+  rename(Species = colnames(cit_st_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cit_st_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cit_st_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cit_st_table)) -> aov_citst
+aov_citst
+```
+
+
+```{r Species 7 depth distribution}
+cit_st_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_depth
+cit_st_depth %>% 
+  subset(Station != "SHR") -> cit_st_depth
+ggplot(cit_st_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("C. stigmaeus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> citst
+#Reorder stations
+citst$data$Station <- factor(citst$data$Station, levels=neworder)
+citst
+```
+
+```{r Species 7 day distribution}
+cit_st_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_st_day
+cit_st_day
+```
+
+Species 8 (*Semicossyphus pulcher*)
+
+```{r Species 8}
+#Semicossyphus pulcher (rocky reef)
+SemPu<- sort_species[8]
+GoodSemPu = names(SemPu)
+BadSemPu <- setdiff(taxa_names(physeq_obj), GoodSemPu)
+Sem_Pu <- prune_taxa(GoodSemPu, physeq_obj)
+taxa_names(Sem_Pu)
+vegan_otu(Sem_Pu) -> sem_pu_table
+sem_pu_table <- as.data.frame(sem_pu_table)
+```
+
+```{r Species 8 day:depth}
+sem_pu_table %>%
+  rename(Species = colnames(sem_pu_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sem_pu_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sem_pu_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sem_pu_table)) -> aov_sempu
+
+aov_sempu
+```
+
+
+```{r Species 8 depth distribution}
+sem_pu_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sem_pu_depth
+sem_pu_depth %>% 
+  subset(Station != "SHR") -> sem_pu_depth
+ggplot(sem_pu_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("S. pulcher") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> sempu
+#Reorder stations
+sempu$data$Station <- factor(sempu$data$Station, levels=neworder)
+sempu
+```
+
+```{r Species 8 day distribution}
+sem_pu_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sem_pu_day
+sem_pu_day
+```
+
+Species 9 (Family Embiotocidae)
+
+```{r Species 9}
+#Family Embiotocidae (sandy bottom)
+FamEm<- sort_species[9]
+GoodFamEm = names(FamEm)
+BadFamEm <- setdiff(taxa_names(physeq_obj), GoodFamEm)
+Fam_Em <- prune_taxa(GoodFamEm, physeq_obj)
+taxa_names(Fam_Em)
+vegan_otu(Fam_Em) -> fam_em_table
+fam_em_table <- as.data.frame(fam_em_table)
+```
+
+```{r Species 9 day:depth}
+fam_em_table %>%
+  rename(Species = colnames(fam_em_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> fam_em_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = fam_em_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = fam_em_table)) -> aov_famem
+aov_famem
+```
+
+
+```{r Species 9 depth distribution}
+fam_em_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_depth
+fam_em_depth %>% 
+  subset(Station != "SHR") -> fam_em_depth
+ggplot(fam_em_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Family Embiotocidae") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem
+#Reorder stations
+famem$data$Station <- factor(famem$data$Station, levels=neworder)
+famem
+```
+
+```{r Species 9 day distribution}
+fam_em_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_day
+fam_em_day
+```
+
+Species 10 (*Leuresthes tenuis*)
+
+```{r Species 10}
+#Leuresthes tenuis (pelagic)
+LeuTe<- sort_species[10]
+GoodLeuTe = names(LeuTe)
+BadLeuTe <- setdiff(taxa_names(physeq_obj), GoodLeuTe)
+Leu_Te <- prune_taxa(GoodLeuTe, physeq_obj)
+taxa_names(Leu_Te)
+vegan_otu(Leu_Te) -> leu_te_table
+leu_te_table <- as.data.frame(leu_te_table)
+```
+
+```{r Species 10 day:depth}
+leu_te_table %>%
+  rename(Species = colnames(leu_te_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> leu_te_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = leu_te_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = leu_te_table)) -> aov_leute
+aov_leute
+```
+
+
+```{r Species 10 depth distribution}
+leu_te_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_depth
+leu_te_depth %>% 
+  subset(Station != "SHR") -> leu_te_depth
+ggplot(leu_te_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("L. tenuis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> leute
+#Reorder stations
+leute$data$Station <- factor(leute$data$Station, levels=neworder)
+leute
+```
+
+```{r Species 10 day distribution}
+leu_te_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> leu_te_day
+leu_te_day
+
+```
+
+Species 11 (*Seriphus politus*)
+
+```{r Species 11}
+#Seriphus politus (demersal)
+SerPo<- sort_species[11]
+GoodSerPo = names(SerPo)
+BadSerPo <- setdiff(taxa_names(physeq_obj), GoodSerPo)
+Ser_Po <- prune_taxa(GoodSerPo, physeq_obj)
+taxa_names(Ser_Po)
+vegan_otu(Ser_Po) -> ser_po_table
+ser_po_table <- as.data.frame(ser_po_table)
+```
+
+```{r Species 11 day:depth}
+ser_po_table %>%
+  rename(Species = colnames(ser_po_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ser_po_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ser_po_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ser_po_table)) -> aov_serpo
+aov_serpo
+```
+
+```{r Species 11 depth distribution}
+ser_po_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_depth
+ser_po_depth %>% 
+  subset(Station != "SHR") -> ser_po_depth
+ggplot(ser_po_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("S. politus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo
+#Reorder stations
+serpo$data$Station <- factor(serpo$data$Station, levels=neworder)
+serpo
+```
+
+```{r Species 11 day distribution}
+ser_po_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_day
+ser_po_day
+```
+
+Species 12 (*Atherinops affinis*)
+
+```{r Species 12}
+#Atherinops affinis (pelagic)
+AthAf<- sort_species[12]
+GoodAthAf = names(AthAf)
+BadAthAf <- setdiff(taxa_names(physeq_obj), GoodAthAf)
+Ath_Af <- prune_taxa(GoodAthAf, physeq_obj)
+taxa_names(Ath_Af)
+vegan_otu(Ath_Af) -> ath_af_table
+ath_af_table <- as.data.frame(ath_af_table)
+```
+
+```{r Species 12 day:depth}
+ath_af_table %>%
+  rename(Species = colnames(ath_af_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ath_af_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ath_af_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ath_af_table)) -> aov_athaf
+aov_athaf
+```
+
+```{r Species 12 depth distribution}
+ath_af_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_depth
+ath_af_depth %>% 
+  subset(Station != "SHR") -> ath_af_depth
+ggplot(ath_af_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("A. affinis") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> athaf
+#Reorder stations
+athaf$data$Station <- factor(athaf$data$Station, levels=neworder)
+athaf
+```
+
+```{r Species 12 day distribution}
+ath_af_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ath_af_day
+ath_af_day
+```
+
+Species 13 (*Squatina californica*)
+
+```{r Species 13}
+#Squatina californica (sandy bottom)
+SquCa<- sort_species[13]
+GoodSquCa = names(SquCa)
+BadSquCa <- setdiff(taxa_names(physeq_obj), GoodSquCa)
+Squ_Ca <- prune_taxa(GoodSquCa, physeq_obj)
+taxa_names(Squ_Ca)
+vegan_otu(Squ_Ca) -> squ_ca_table
+squ_ca_table <- as.data.frame(squ_ca_table)
+```
+
+```{r Species 13 day:depth}
+squ_ca_table %>%
+  rename(Species = colnames(squ_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> squ_ca_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = squ_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = squ_ca_table)) -> aov_squca
+
+aov_squca
+```
+
+```{r Species 13 depth distribution}
+squ_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> squ_ca_depth
+squ_ca_depth %>% 
+  subset(Station != "SHR") -> squ_ca_depth
+ggplot(squ_ca_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("S. californica") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> squca
+#Reorder stations
+squca$data$Station <- factor(squca$data$Station, levels=neworder)
+squca
+```
+
+``` {r Species 13 day distribution}
+squ_ca_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> squ_ca_day
+squ_ca_day
+```
+
+Species 14 (Genus *Gibbonsia*)
+
+```{r Species 14}
+#Gibbonsia genus (rocky reef)
+GibGe<- sort_species[14]
+GoodGibGe = names(GibGe)
+BadGibGe <- setdiff(taxa_names(physeq_obj), GoodGibGe)
+Gib_Ge <- prune_taxa(GoodGibGe, physeq_obj)
+taxa_names(Gib_Ge)
+vegan_otu(Gib_Ge) -> gib_ge_table
+gib_ge_table <- as.data.frame(gib_ge_table)
+```
+
+```{r Species 14 day:depth}
+gib_ge_table %>%
+  rename(Species = colnames(gib_ge_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> gib_ge_table
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gib_ge_table))
+anova(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gib_ge_table)) -> aov_gibge
+aov_gibge
+```
+
+```{r Species 14 depth distribution}
+gib_ge_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_depth
+gib_ge_depth %>% 
+  subset(Station != "SHR") -> gib_ge_depth
+ggplot(gib_ge_depth, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great[2:6]) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=15), plot.title = element_text(size=15, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "eDNA Index", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Gibbonsia spp.") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> gibge
+#Reorder stations
+gibge$data$Station <- factor(gibge$data$Station, levels=neworder)
+gibge
+```
+
+```{r Species 14 day distribution}
+gib_ge_table %>%
+  group_by(Day) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_ge_day
+gib_ge_day
+
+```
+
+
+Gradient Forest for nearshore vs. surf zone analysis (including shore station eDNA index values) *Note: this reuses several variables from the previous gradientforest models (keep in mind)*
+
+```{r GradientForest Offshore, results="hide",warning=FALSE}
+
+carnivore_rel_abun_withshore<- vegan_otu(physeq_obj)
+
+#Remake Indexed OTU table
+ind_val <- as.data.frame(carnivore_rel_abun_withshore)
+#Make Numeric
+ind_val <- sapply(ind_val, as.numeric)
+#Re apply row and col names
+row.names(ind_val) <- row.names(carnivore_rel_abun_withshore)
+colnames(ind_val) <- colnames(carnivore_rel_abun_withshore)
+#Rename Column Names
+species_names <- colnames(carnivore_rel_abun_withshore)
+easy_name <- vector(length=length(species_names))
+for (i in 1:length(easy_name)) {
+  easy_name[i] <- paste0("species", i)
+}
+#Store Name Pairs
+species_list <- as.list(easy_name,species_names)
+names(species_names) <- easy_name
+input_meta_path3 <- "/Users/keiramonuki/Documents/Barber_Lab/KM_metadata_gradientForest_2.13.20.txt"
+metadata3 <- read.table(input_meta_path3, header = 1, sep = "\t", stringsAsFactors = F)
+metadata3 <- as.data.frame(metadata3)
+row_namers <- metadata3$Sample_name
+metadata3 <- sapply(metadata3, as.numeric)
+row.names(metadata3) <- row_namers
+metadata3 <- metadata3[,2:5]
+datDF_carn<-merge(metadata3,ind_val,by="row.names")
+g <- length(datDF_carn)
+row_namers2 <- row.names(ind_val)
+datDF_carn <- sapply(datDF_carn, as.numeric)
+datDF_carn <- datDF_carn[,2:g]
+datDF_carn <- as.data.frame(datDF_carn)
+row.names(datDF_carn) <- row_namers2 
+###########################################
+# GRADIENT FOREST  (all stations)         #
+###########################################
+eDNA_gradFor2<-gradientForest(datDF_carn,
+                             predictor.vars = colnames(metadata3), 
+                             response.vars = colnames(ind_val),
+                             ntree = 500, transform = NULL, compact = F,
+                             corr.threshold = 0.5, trace=T)
+```
+
+After creating the model, we will plot the overall importance of the environmental variables and the performance of each species. 
+
+```{r Overall Importance of Environmental Variables}
+#Plot Overall Importance of Environmental Variables
+importance(eDNA_gradFor2)
+plot(eDNA_gradFor2,plot.type="Overall.Importance", col = c(col_mpa), cex.axis = 0.8)
+```
+The overall importance of the variables are as follows: R2 weighted importance is Depth_m (0.122533256), Off_On (0.059836655),  Collected_Date (0.055256502), Replicate (0.005142977 ). Accuracy importance is Depth_m (0.011437802), Off_On (0.006224839), Collected_Date (0.005667866), Replicate (-0.001496526). 
+<br />
+
+We will then assess the species performances in the gradientForest model. 
+
+```{r Species performances}
+#R^2 fit for each species
+plot(eDNA_gradFor2, plot.type = "Performance", show.names = F, horizontal = F,
+     cex.axis = 1, cex.labels = 0.7, line = 2.5)
+```
+
+```{r Sort species by performance}
+sort(eDNA_gradFor2$result, decreasing=T) -> sort_species2
+sort_species2
+```
+
+There are seven species with >0.40 R^2 importance. I will plot their distributions across sampling stations.
+
+Species 1 (*Menticirrhus undulatus*)
+
+```{r Species 1}
+#Menticirrhus undulatus
+men_un_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> men_un_depth_withshore
+ggplot(men_un_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Menticirrhus undulatus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> menun_withshore
+#Reorder stations
+menun_withshore$data$Station <- factor(menun_withshore$data$Station, levels=neworder_full)
+menun_withshore
+```
+
+Species 2 (Family Embiotocidae)
+
+```{r Species 2}
+#Family Embiotocidae
+fam_em_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> fam_em_depth_withshore
+ggplot(fam_em_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Family Embiotocidae") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> famem_withshore
+#Reorder stations
+famem_withshore$data$Station <- factor(famem_withshore$data$Station, levels=neworder_full)
+famem_withshore
+```
+
+Species 3 (*Umbrina roncador*)
+
+```{r Species 3}
+#Umbrina roncador
+umb_ro_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> umb_ro_depth_withshore
+ggplot(umb_ro_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Umbrina roncador") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> umbro_withshore
+#Reorder stations
+umbro_withshore$data$Station <- factor(umbro_withshore$data$Station, levels=neworder_full)
+umbro_withshore
+```
+
+Species 4 (*Paralabrax clathratus*)
+
+```{r Species 4}
+#Paralabrax clathratus
+par_cl_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_cl_depth_withshore
+ggplot(par_cl_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax clathratus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parcl_withshore
+#Reorder stations
+parcl_withshore$data$Station <- factor(parcl_withshore$data$Station, levels=neworder_full)
+parcl_withshore
+```
+
+Species 5 (*Seriphus politus*)
+
+```{r Species 5}
+#Seriphus politus
+ser_po_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ser_po_depth_withshore
+ggplot(ser_po_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Seriphus politus") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> serpo_withshore
+#Reorder stations
+serpo_withshore$data$Station <- factor(serpo_withshore$data$Station, levels=neworder_full)
+serpo_withshore
+```
+
+Species 6 (*Paralabrax nebulifer*)
+
+```{r Species 6}
+#Paralabrax nebulifer
+par_ne_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ne_depth_withshore
+ggplot(par_ne_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Paralabrax nebulifer") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> parne_withshore
+#Reorder stations
+parne_withshore$data$Station <- factor(parne_withshore$data$Station, levels=neworder_full)
+parne_withshore
+```
+
+Species 7 (*Hermosilla azurea*)
+
+```{r Species 7}
+#Hermosilla azurea
+GoodHerAz = names(HerAz)
+BadHerAz <- setdiff(taxa_names(physeq_obj_sub), GoodHerAz)
+Her_Az <- prune_taxa(GoodHerAz, physeq_obj_sub)
+taxa_names(Her_Az)
+vegan_otu(Her_Az) -> her_az_table
+her_az_table <- as.data.frame(her_az_table)
+her_az_table %>%
+  rename(Species = colnames(her_az_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Day, -Replicate, -miu_elas) %>% 
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> her_az_depth_withshore
+ggplot(her_az_depth_withshore, aes(x = Station, y = mean)) + 
+  geom_col(aes(fill = Station)) + theme_bw() + 
+  scale_fill_manual(values = col.great) +
+  theme(legend.position = "none", panel.grid.minor.y=element_blank(),panel.grid.minor.x=element_blank(),panel.grid.major.y=element_blank(),panel.grid.major.x=element_blank(), axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.title = element_text(size=12), plot.title = element_text(size=20, face = "italic"), 
+        axis.text = element_text(size=12)) + 
+  scale_y_continuous(name = "Mean eDNA Index Abundance", limits = c(0,0.75)) + 
+  xlab("Depth Station") +
+  ggtitle("Hermosilla azurea") + 
+  geom_errorbar(aes(ymin = mean-se, ymax = mean+se, width = 0.2)) -> heraz_withshore
+#Reorder stations
+heraz_withshore$data$Station <- factor(heraz_withshore$data$Station, levels=neworder_full)
+heraz_withshore
+```
+
+We will now run the temporal analyses and assess the depth distributions for the remaining species. 
+
+```{r Cymatogaster aggregata time}
+#Cymatogaster aggregata
+
+GoodCymAg = "Chordata;Actinopteri;;Embiotocidae;Cymatogaster;Cymatogaster aggregata"
+Cym_Ag <- prune_taxa(GoodCymAg, physeq_obj)
+taxa_names(Cym_Ag)
+
+vegan_otu(Cym_Ag) -> cym_ag_table
+
+cym_ag_table <- as.data.frame(cym_ag_table)
+
+cym_ag_table %>%
+  rename(Species = colnames(cym_ag_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cym_ag_table
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cym_ag_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = cym_ag_table)) -> aov_cymag
+
+aov_cymag
+```
+
+```{r Cymatogaster aggregata depth}
+
+cym_ag_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cym_ag_depth
+cym_ag_depth
+```
+
+*Hypsurus caryi*
+
+```{r Hypsurus caryi time}
+#Hypsurus caryi
+
+GoodHypCa = "Chordata;Actinopteri;;Embiotocidae;Hypsurus;Hypsurus caryi"
+Hyp_Ca <- prune_taxa(GoodHypCa, physeq_obj)
+taxa_names(Hyp_Ca)
+
+vegan_otu(Hyp_Ca) -> hyp_ca_table
+
+hyp_ca_table <- as.data.frame(hyp_ca_table)
+
+hyp_ca_table %>%
+  rename(Species = colnames(hyp_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> hyp_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = hyp_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = hyp_ca_table)) -> aov_hypca
+
+aov_hypca
+```
+
+```{r Hypsurus caryi depth}
+
+hyp_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> hyp_ca_depth
+hyp_ca_depth
+```
+*Micrometrus minimus*
+
+```{r Micrometrus minimus time}
+#Micrometrus minimus
+
+GoodMicMi = "Chordata;Actinopteri;;Embiotocidae;Micrometrus;Micrometrus minimus"
+Mic_Mi <- prune_taxa(GoodMicMi, physeq_obj)
+taxa_names(Mic_Mi)
+
+vegan_otu(Mic_Mi) -> mic_mi_table
+
+mic_mi_table <- as.data.frame(mic_mi_table)
+
+mic_mi_table %>%
+  rename(Species = colnames(mic_mi_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> mic_mi_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = mic_mi_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = mic_mi_table)) -> aov_micmi
+
+aov_micmi
+```
+
+```{r Micrometrus minimus depth}
+
+mic_mi_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> mic_mi_depth
+mic_mi_depth
+```
+
+*Rhacochilus toxotes*
+
+```{r Rhacochilus toxotes time}
+#Rhacochilus toxotes
+
+GoodRhaTo = "Chordata;Actinopteri;;Embiotocidae;Rhacochilus;Rhacochilus toxotes"
+Rha_To <- prune_taxa(GoodRhaTo, physeq_obj)
+taxa_names(Rha_To)
+
+vegan_otu(Rha_To) -> rha_to_table
+
+rha_to_table <- as.data.frame(rha_to_table)
+
+rha_to_table %>%
+  rename(Species = colnames(rha_to_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> rha_to_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = rha_to_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = rha_to_table)) -> aov_rhato
+
+aov_rhato
+```
+
+```{r Rhacochilus toxotes depth}
+
+rha_to_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rha_to_depth
+rha_to_depth
+```
+
+*Rhacochilus vacca*
+
+```{r Rhacochilus vacca time}
+#Rhacochilus vacca
+
+GoodRhaVa = "Chordata;Actinopteri;;Embiotocidae;Rhacochilus;Rhacochilus vacca"
+Rha_Va <- prune_taxa(GoodRhaVa, physeq_obj)
+taxa_names(Rha_Va)
+
+vegan_otu(Rha_Va) -> rha_va_table
+
+rha_va_table <- as.data.frame(rha_va_table)
+
+rha_va_table %>%
+  rename(Species = colnames(rha_va_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> rha_va_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = rha_va_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = rha_va_table)) -> aov_rhava
+
+aov_rhava
+```
+
+```{r Rhacochilus vacca depth}
+
+rha_va_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rha_va_depth
+rha_va_depth
+```
+
+*Chromis punctipinnis*
+
+```{r Chromis punctipinnis time}
+#Chromis punctipinnis
+
+GoodChrPu = "Chordata;Actinopteri;;Pomacentridae;Chromis;Chromis punctipinnis"
+Chr_Pu <- prune_taxa(GoodChrPu, physeq_obj)
+taxa_names(Chr_Pu)
+
+vegan_otu(Chr_Pu) -> chr_pu_table
+
+chr_pu_table <- as.data.frame(chr_pu_table)
+
+chr_pu_table %>%
+  rename(Species = colnames(chr_pu_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> chr_pu_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = chr_pu_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = chr_pu_table)) -> aov_chrpu
+
+aov_chrpu
+```
+
+```{r Chromis punctipinnis depth}
+
+chr_pu_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> chr_pu_depth
+chr_pu_depth
+```
+
+*Caulolatilus princeps*
+
+```{r Caulolatilus princeps time}
+#Caulolatilus princeps
+
+GoodCauPr = "Chordata;Actinopteri;;Malacanthidae;Caulolatilus;Caulolatilus princeps"
+Cau_Pr <- prune_taxa(GoodCauPr, physeq_obj)
+taxa_names(Cau_Pr)
+
+vegan_otu(Cau_Pr) -> cau_pr_table
+
+cau_pr_table <- as.data.frame(cau_pr_table)
+
+cau_pr_table %>%
+  rename(Species = colnames(cau_pr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cau_pr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cau_pr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = cau_pr_table)) -> aov_caupr
+
+aov_caupr
+```
+
+```{r Caulolatilus princeps depth}
+
+cau_pr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cau_pr_depth
+cau_pr_depth
+```
+
+*Hypsypops rubicundus*
+
+```{r Hypsypops rubicundus time}
+#Hypsypops rubicundus
+
+GoodHypRu = "Chordata;Actinopteri;;Pomacentridae;Hypsypops;Hypsypops rubicundus"
+Hyp_Ru <- prune_taxa(GoodHypRu, physeq_obj)
+taxa_names(Hyp_Ru)
+
+vegan_otu(Hyp_Ru) -> hyp_ru_table
+
+hyp_ru_table <- as.data.frame(hyp_ru_table)
+
+hyp_ru_table %>%
+  rename(Species = colnames(hyp_ru_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> hyp_ru_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = hyp_ru_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = hyp_ru_table)) -> aov_hypru
+
+aov_hypru
+```
+
+```{r Hypsypops rubicundus depth}
+
+hyp_ru_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> hyp_ru_depth
+hyp_ru_depth
+```
+
+*Cheilotrema saturnum*
+
+```{r Cheilotrema saturnum time}
+#Cheilotrema saturnum
+
+GoodCheSa = "Chordata;Actinopteri;;Sciaenidae;Cheilotrema;Cheilotrema saturnum"
+Che_Sa <- prune_taxa(GoodCheSa, physeq_obj)
+taxa_names(Che_Sa)
+
+vegan_otu(Che_Sa) -> che_sa_table
+
+che_sa_table <- as.data.frame(che_sa_table)
+
+che_sa_table %>%
+  rename(Species = colnames(che_sa_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> che_sa_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = che_sa_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = che_sa_table)) -> aov_chesa
+
+aov_chesa
+```
+
+```{r Cheilotrema saturnum depth}
+
+che_sa_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> che_sa_depth
+che_sa_depth
+```
+
+*Sphyraena argentea*
+
+```{r Sphyraena argentea time}
+#Sphyraena argentea
+
+GoodSphAr = "Chordata;Actinopteri;;Sphyraenidae;Sphyraena;Sphyraena argentea"
+Sph_Ar <- prune_taxa(GoodSphAr, physeq_obj)
+taxa_names(Sph_Ar)
+
+vegan_otu(Sph_Ar) -> sph_ar_table
+
+sph_ar_table <- as.data.frame(sph_ar_table)
+
+sph_ar_table %>%
+  rename(Species = colnames(sph_ar_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sph_ar_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sph_ar_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sph_ar_table)) -> aov_sphar
+
+aov_sphar
+```
+
+```{r Sphyraena argentea depth}
+
+sph_ar_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sph_ar_depth
+sph_ar_depth
+```
+
+*Synodus lucioceps*
+
+```{r Synodus lucioceps time}
+#Synodus lucioceps
+
+GoodSynLu= "Chordata;Actinopteri;Aulopiformes;Synodontidae;Synodus;Synodus lucioceps"
+Syn_Lu <- prune_taxa(GoodSynLu, physeq_obj)
+taxa_names(Syn_Lu)
+
+vegan_otu(Syn_Lu) -> syn_lu_table
+
+syn_lu_table <- as.data.frame(syn_lu_table)
+
+syn_lu_table %>%
+  rename(Species = colnames(syn_lu_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> syn_lu_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = syn_lu_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = syn_lu_table)) -> aov_synlu
+
+aov_synlu
+```
+
+```{r Synodus lucioceps depth}
+
+syn_lu_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> syn_lu_depth
+syn_lu_depth
+```
+
+*Strongylura exilis*
+
+```{r Strongylura exilis time}
+#Strongylura exilis
+
+GoodStrEx = "Chordata;Actinopteri;Beloniformes;Belonidae;Strongylura;Strongylura exilis"
+Str_Ex <- prune_taxa(GoodStrEx, physeq_obj)
+taxa_names(Str_Ex)
+
+vegan_otu(Str_Ex) -> str_ex_table
+
+str_ex_table <- as.data.frame(str_ex_table)
+
+str_ex_table %>%
+  rename(Species = colnames(str_ex_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> str_ex_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = str_ex_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = str_ex_table)) -> aov_strex
+
+aov_strex
+```
+
+```{r Strongylura exilis depth}
+
+str_ex_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> str_ex_depth
+str_ex_depth
+```
+
+*Hypsoblennius gilberti*
+
+```{r Hypsoblennius gilberti time}
+#Hypsoblennius gilberti
+
+GoodHypGi = "Chordata;Actinopteri;Blenniiformes;Blenniidae;Hypsoblennius;Hypsoblennius gilberti"
+Hyp_Gi <- prune_taxa(GoodHypGi, physeq_obj)
+taxa_names(Hyp_Gi)
+
+vegan_otu(Hyp_Gi) -> hyp_gi_table
+
+hyp_gi_table <- as.data.frame(hyp_gi_table)
+
+hyp_gi_table %>%
+  rename(Species = colnames(hyp_gi_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> hyp_gi_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = hyp_gi_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = hyp_gi_table)) -> aov_hypgi
+
+aov_hypgi
+```
+
+```{r Hypsoblennius gilberti depth}
+
+hyp_gi_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> hyp_gi_depth
+hyp_gi_depth
+```
+
+*Hypsoblennius jenkinsi*
+
+```{r Hypsoblennius jenkinsi time}
+#Hypsoblennius jenkinsi
+
+GoodHypJe = "Chordata;Actinopteri;Blenniiformes;Blenniidae;Hypsoblennius;Hypsoblennius jenkinsi"
+Hyp_Je <- prune_taxa(GoodHypJe, physeq_obj)
+taxa_names(Hyp_Je)
+
+vegan_otu(Hyp_Je) -> hyp_je_table
+
+hyp_je_table <- as.data.frame(hyp_je_table)
+
+hyp_je_table %>%
+  rename(Species = colnames(hyp_je_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> hyp_je_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = hyp_je_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = hyp_je_table)) -> aov_hypje
+
+aov_hypje
+```
+
+```{r Hypsoblennius jenkinsi depth}
+
+hyp_je_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> hyp_je_depth
+hyp_je_depth
+```
+
+*Gibbonsia montereyensis*
+
+```{r Gibbonsia montereyensis time}
+#Gibbonsia montereyensis
+
+GoodGibMo = "Chordata;Actinopteri;Blenniiformes;Clinidae;Gibbonsia;Gibbonsia montereyensis"
+Gib_Mo <- prune_taxa(GoodGibMo, physeq_obj)
+taxa_names(Gib_Mo)
+
+vegan_otu(Gib_Mo) -> gib_mo_table
+
+gib_mo_table <- as.data.frame(gib_mo_table)
+
+gib_mo_table %>%
+  rename(Species = colnames(gib_mo_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> gib_mo_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gib_mo_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = gib_mo_table)) -> aov_gibmo
+
+aov_gibmo
+```
+
+```{r Gibbonsia montereyensis depth}
+
+gib_mo_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gib_mo_depth
+gib_mo_depth
+```
+
+*Paraclinus integripinnis*
+
+```{r Paraclinus integripinnis time}
+#Paraclinus integripinnis
+
+GoodParIn = "Chordata;Actinopteri;Blenniiformes;Labrisomidae;Paraclinus;Paraclinus integripinnis"
+Par_In <- prune_taxa(GoodParIn, physeq_obj)
+taxa_names(Par_In)
+
+vegan_otu(Par_In) -> par_in_table
+
+par_in_table <- as.data.frame(par_in_table)
+
+par_in_table %>%
+  rename(Species = colnames(par_in_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> par_in_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_in_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = par_in_table)) -> aov_parin
+
+aov_parin
+```
+
+```{r Paraclinus integripinnis depth}
+
+par_in_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_in_depth
+par_in_depth
+```
+
+*Trachurus symmetricus*
+
+```{r Trachurus symmetricus time}
+#Trachurus symmetricus
+
+GoodTraSy = "Chordata;Actinopteri;Carangiformes;Carangidae;Trachurus;Trachurus symmetricus"
+Tra_Sy <- prune_taxa(GoodTraSy, physeq_obj)
+taxa_names(Tra_Sy)
+
+vegan_otu(Tra_Sy) -> tra_sy_table
+
+tra_sy_table <- as.data.frame(tra_sy_table)
+
+tra_sy_table %>%
+  rename(Species = colnames(tra_sy_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> tra_sy_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = tra_sy_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = tra_sy_table)) -> aov_trasy
+
+aov_trasy
+```
+
+```{r Trachurus symmetricus depth}
+
+tra_sy_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> tra_sy_depth
+tra_sy_depth
+```
+
+*Medialuna californiensis*
+
+```{r Medialuna californiensis time}
+#Medialuna californiensis
+
+GoodMedCa = "Chordata;Actinopteri;Centrarchiformes;Kyphosidae;Medialuna;Medialuna californiensis"
+Med_Ca <- prune_taxa(GoodMedCa, physeq_obj)
+taxa_names(Med_Ca)
+
+vegan_otu(Med_Ca) -> med_ca_table
+
+med_ca_table <- as.data.frame(med_ca_table)
+
+med_ca_table %>%
+  rename(Species = colnames(med_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> med_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = med_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = med_ca_table)) -> aov_medca
+
+aov_medca
+```
+
+```{r Medialuna californiensis depth}
+
+med_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> med_ca_depth
+med_ca_depth
+```
+
+*Lethops connectens*
+
+```{r Lethops connectens time}
+#Cheilotrema saturnum
+
+GoodLetCo = "Chordata;Actinopteri;Gobiiformes;Gobiidae;Lethops;Lethops connectens"
+Let_Co <- prune_taxa(GoodLetCo, physeq_obj)
+taxa_names(Let_Co)
+
+vegan_otu(Let_Co) -> let_co_table
+
+let_co_table <- as.data.frame(let_co_table)
+
+let_co_table %>%
+  rename(Species = colnames(let_co_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> let_co_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = let_co_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = let_co_table)) -> aov_letco
+
+aov_letco
+```
+
+```{r Lethops connectens depth}
+
+let_co_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> let_co_depth
+let_co_depth
+```
+
+*Typhlogobius californiensis*
+
+```{r Typhlogobius californiensis time}
+#Typhlogobius californiensis
+
+GoodTypCa = "Chordata;Actinopteri;Gobiiformes;Gobiidae;Typhlogobius;Typhlogobius californiensis"
+Typ_Ca <- prune_taxa(GoodTypCa, physeq_obj)
+taxa_names(Typ_Ca)
+
+vegan_otu(Typ_Ca) -> typ_ca_table
+
+typ_ca_table <- as.data.frame(typ_ca_table)
+
+typ_ca_table %>%
+  rename(Species = colnames(typ_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> typ_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = typ_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = typ_ca_table)) -> aov_typca
+
+aov_typca
+```
+
+```{r Typhlogobius californiensis depth}
+
+typ_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> typ_ca_depth
+typ_ca_depth
+```
+
+*Halichoeres semicinctus*
+
+```{r Halichoeres semicinctus time}
+#Halichoeres semicinctus
+
+GoodHalSe = "Chordata;Actinopteri;Labriformes;Labridae;Halichoeres;Halichoeres semicinctus"
+Hal_Se <- prune_taxa(GoodHalSe, physeq_obj)
+taxa_names(Hal_Se)
+
+vegan_otu(Hal_Se) -> hal_se_table
+
+hal_se_table <- as.data.frame(hal_se_table)
+
+hal_se_table %>%
+  rename(Species = colnames(hal_se_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> hal_se_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = hal_se_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = hal_se_table)) -> aov_halse
+
+aov_halse
+```
+
+```{r Halichoeres semicinctus depth}
+
+hal_se_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> hal_se_depth
+hal_se_depth
+```
+
+*Oxyjulis californica*
+
+```{r Oxyjulis californica time}
+#Oxyjulis californica
+
+GoodOxyCa = "Chordata;Actinopteri;Labriformes;Labridae;Oxyjulis;Oxyjulis californica"
+Oxy_Ca <- prune_taxa(GoodOxyCa, physeq_obj)
+taxa_names(Oxy_Ca)
+
+vegan_otu(Oxy_Ca) -> oxy_ca_table
+
+oxy_ca_table <- as.data.frame(oxy_ca_table)
+
+oxy_ca_table %>%
+  rename(Species = colnames(oxy_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> oxy_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = oxy_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = oxy_ca_table)) -> aov_oxyca
+
+aov_oxyca
+```
+
+```{r Oxyjulis californica depth}
+
+oxy_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> oxy_ca_depth
+oxy_ca_depth
+```
+
+*Mugil cephalus*
+
+```{r Mugil cephalus time}
+#Mugil cephalus
+
+GoodMugCe = "Chordata;Actinopteri;Mugiliformes;Mugilidae;Mugil;Mugil cephalus"
+Mug_Ce <- prune_taxa(GoodMugCe, physeq_obj)
+taxa_names(Mug_Ce)
+
+vegan_otu(Mug_Ce) -> mug_ce_table
+
+mug_ce_table <- as.data.frame(mug_ce_table)
+
+mug_ce_table %>%
+  rename(Species = colnames(mug_ce_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> mug_ce_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = mug_ce_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = mug_ce_table)) -> aov_mugce
+
+aov_mugce
+```
+
+```{r Mugil cephalus depth}
+
+mug_ce_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> mug_ce_depth
+mug_ce_depth
+```
+
+*Ophidion scrippsae*
+
+```{r Ophidion scrippsae time}
+#Ophidion scrippsae
+
+GoodOphSc = "Chordata;Actinopteri;Ophidiiformes;Ophidiidae;Ophidion;Ophidion scrippsae"
+Oph_Sc <- prune_taxa(GoodOphSc, physeq_obj)
+taxa_names(Oph_Sc)
+
+vegan_otu(Oph_Sc) -> oph_sc_table
+
+oph_sc_table <- as.data.frame(oph_sc_table)
+
+oph_sc_table %>%
+  rename(Species = colnames(oph_sc_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> oph_sc_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = oph_sc_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = oph_sc_table)) -> aov_ophsc
+
+aov_ophsc
+```
+
+```{r Ophidion scrippsae depth}
+
+oph_sc_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> oph_sc_depth
+oph_sc_depth
+```
+
+*Clinocottus analis*
+
+```{r Clinocottus analis time}
+#Clinocottus analis
+
+GoodCliAn = "Chordata;Actinopteri;Perciformes;Cottidae;Clinocottus;Clinocottus analis"
+Cli_An <- prune_taxa(GoodCliAn, physeq_obj)
+taxa_names(Cli_An)
+
+vegan_otu(Cli_An) -> cli_an_table
+
+cli_an_table <- as.data.frame(cli_an_table)
+
+cli_an_table %>%
+  rename(Species = colnames(cli_an_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cli_an_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cli_an_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = cli_an_table)) -> aov_clian
+
+aov_clian
+```
+
+```{r Clinocottus analis depth}
+
+cli_an_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cli_an_depth
+cli_an_depth
+```
+
+*Clinocottus recalvus*
+
+```{r Clinocottus recalvus time}
+#Clinocottus recalvus
+
+GoodCliRe = "Chordata;Actinopteri;Perciformes;Cottidae;Clinocottus;Clinocottus recalvus"
+Cli_Re <- prune_taxa(GoodCliRe, physeq_obj)
+taxa_names(Cli_Re)
+
+vegan_otu(Cli_Re) -> cli_re_table
+
+cli_re_table <- as.data.frame(cli_re_table)
+
+cli_re_table %>%
+  rename(Species = colnames(cli_re_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cli_re_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cli_re_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = cli_re_table)) -> aov_clire
+
+aov_clire
+```
+
+```{r Clinocottus recalvus depth}
+
+cli_re_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cli_re_depth
+cli_re_depth
+```
+
+*Ruscarius creaseri*
+
+```{r Ruscarius creaseri time}
+#Ruscarius creaseri
+
+GoodRusCr = "Chordata;Actinopteri;Perciformes;Cottidae;Ruscarius;Ruscarius creaseri"
+Rus_Cr <- prune_taxa(GoodRusCr, physeq_obj)
+taxa_names(Rus_Cr)
+
+vegan_otu(Rus_Cr) -> rus_cr_table
+
+rus_cr_table <- as.data.frame(rus_cr_table)
+
+rus_cr_table %>%
+  rename(Species = colnames(rus_cr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> rus_cr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = rus_cr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = rus_cr_table)) -> aov_ruscr
+
+aov_ruscr
+```
+
+```{r Ruscarius creaseri depth}
+
+rus_cr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> rus_cr_depth
+rus_cr_depth
+```
+
+*Scorpaenichthys marmoratus*
+
+```{r Scorpaenichthys marmoratus time}
+#Scorpaenichthys marmoratus
+
+GoodScoMa = "Chordata;Actinopteri;Perciformes;Cottidae;Scorpaenichthys;Scorpaenichthys marmoratus"
+Sco_Ma <- prune_taxa(GoodScoMa, physeq_obj)
+taxa_names(Sco_Ma)
+
+vegan_otu(Sco_Ma) -> sco_ma_table
+
+sco_ma_table <- as.data.frame(sco_ma_table)
+
+sco_ma_table %>%
+  rename(Species = colnames(sco_ma_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sco_ma_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sco_ma_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sco_ma_table)) -> aov_scoma
+
+aov_scoma
+```
+
+```{r Scorpaenichthys marmoratus depth}
+
+sco_ma_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_ma_depth
+sco_ma_depth
+```
+
+*Oxylebius pictus*
+
+```{r Oxylebius pictus time}
+#Oxylebius pictus
+
+GoodOxyPi = "Chordata;Actinopteri;Perciformes;Hexagrammidae;Oxylebius;Oxylebius pictus"
+Oxy_Pi <- prune_taxa(GoodOxyPi, physeq_obj)
+taxa_names(Oxy_Pi)
+
+vegan_otu(Oxy_Pi) -> oxy_pi_table
+
+oxy_pi_table <- as.data.frame(oxy_pi_table)
+
+oxy_pi_table %>%
+  rename(Species = colnames(oxy_pi_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> oxy_pi_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = oxy_pi_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = oxy_pi_table)) -> aov_oxypi
+
+aov_oxypi
+```
+
+```{r Oxylebius pictus depth}
+
+oxy_pi_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> oxy_pi_depth
+oxy_pi_depth
+```
+
+*Scorpaena guttata*
+
+```{r Scorpaena guttata time}
+#Scorpaena guttata
+
+GoodScoGu = "Chordata;Actinopteri;Perciformes;Scorpaenidae;Scorpaena;Scorpaena guttata"
+Sco_Gu <- prune_taxa(GoodScoGu, physeq_obj)
+taxa_names(Sco_Gu)
+
+vegan_otu(Sco_Gu) -> sco_gu_table
+
+sco_gu_table <- as.data.frame(sco_gu_table)
+
+sco_gu_table %>%
+  rename(Species = colnames(sco_gu_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sco_gu_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sco_gu_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sco_gu_table)) -> aov_scogu
+
+aov_scogu
+```
+
+```{r Scorpaena guttata depth}
+
+sco_gu_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sco_gu_depth
+sco_gu_depth
+```
+
+*Symphurus atricaudus*
+
+```{r Symphurus atricaudus time}
+#Symphurus atricaudus
+
+GoodSymAt = "Chordata;Actinopteri;Pleuronectiformes;Cynoglossidae;Symphurus;Symphurus atricaudus"
+Sym_At <- prune_taxa(GoodSymAt, physeq_obj)
+taxa_names(Sym_At)
+
+vegan_otu(Sym_At) -> sym_at_table
+
+sym_at_table <- as.data.frame(sym_at_table)
+
+sym_at_table %>%
+  rename(Species = colnames(sym_at_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sym_at_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sym_at_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sym_at_table)) -> aov_symat
+
+aov_symat
+```
+
+```{r Symphurus atricaudus depth}
+
+sym_at_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sym_at_depth
+sym_at_depth
+```
+
+*Citharichthys sordidus*
+
+```{r Citharichthys sordidus time}
+#Citharichthys sordidus
+
+GoodCitSo = "Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Citharichthys;Citharichthys sordidus"
+Cit_So <- prune_taxa(GoodCitSo, physeq_obj)
+taxa_names(Cit_So)
+
+vegan_otu(Cit_So) -> cit_so_table
+
+cit_so_table <- as.data.frame(cit_so_table)
+
+cit_so_table %>%
+  rename(Species = colnames(cit_so_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> cit_so_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = cit_so_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = cit_so_table)) -> aov_citso
+
+aov_citso
+```
+
+```{r Citharichthys sordidus depth}
+
+cit_so_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> cit_so_depth
+cit_so_depth
+```
+
+*Paralichthys californicus*
+
+```{r Paralichthys californicus time}
+#Paralichthys californicus
+
+GoodParCa = "Chordata;Actinopteri;Pleuronectiformes;Paralichthyidae;Paralichthys;Paralichthys californicus"
+Par_Ca <- prune_taxa(GoodParCa, physeq_obj)
+taxa_names(Par_Ca)
+
+vegan_otu(Par_Ca) -> par_ca_table
+
+par_ca_table <- as.data.frame(par_ca_table)
+
+par_ca_table %>%
+  rename(Species = colnames(par_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> par_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = par_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = par_ca_table)) -> aov_parca
+
+aov_parca
+```
+
+```{r Paralichthys californicus depth}
+
+par_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> par_ca_depth
+par_ca_depth
+```
+
+*Pleuronichthys verticalis*
+
+```{r Pleuronichthys verticalis time}
+#Pleuronichthys verticalis
+
+GoodPleVe = "Chordata;Actinopteri;Pleuronectiformes;Pleuronectidae;Pleuronichthys;Pleuronichthys verticalis"
+Ple_Ve <- prune_taxa(GoodPleVe, physeq_obj)
+taxa_names(Ple_Ve)
+
+vegan_otu(Ple_Ve) -> ple_ve_table
+
+ple_ve_table <- as.data.frame(ple_ve_table)
+
+ple_ve_table %>%
+  rename(Species = colnames(ple_ve_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> ple_ve_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = ple_ve_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = ple_ve_table)) -> aov_pleve
+
+aov_pleve
+```
+
+```{r Pleuronichthys verticalis depth}
+
+ple_ve_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> ple_ve_depth
+ple_ve_depth
+```
+
+*Sarda chiliensis*
+
+```{r Sarda chiliensis time}
+#Sarda chiliensis
+
+GoodSarCh = "Chordata;Actinopteri;Scombriformes;Scombridae;Sarda;Sarda chiliensis"
+Sar_Ch <- prune_taxa(GoodSarCh, physeq_obj)
+taxa_names(Sar_Ch)
+
+vegan_otu(Sar_Ch) -> sar_ch_table
+
+sar_ch_table <- as.data.frame(sar_ch_table)
+
+sar_ch_table %>%
+  rename(Species = colnames(sar_ch_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> sar_ch_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = sar_ch_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = sar_ch_table)) -> aov_sarch
+
+aov_sarch
+```
+
+```{r Sarda chiliensis depth}
+
+sar_ch_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> sar_ch_depth
+sar_ch_depth
+```
+
+*Syngnathus leptorhynchus*
+
+```{r Syngnathus leptorhynchus time}
+#Syngnathus leptorhynchus
+
+GoodSynLe = "Chordata;Actinopteri;Syngnathiformes;Syngnathidae;Syngnathus;Syngnathus leptorhynchus"
+Syn_Le <- prune_taxa(GoodSynLe, physeq_obj)
+taxa_names(Syn_Le)
+
+vegan_otu(Syn_Le) -> syn_le_table
+
+syn_le_table <- as.data.frame(syn_le_table)
+
+syn_le_table %>%
+  rename(Species = colnames(syn_le_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> syn_le_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = syn_le_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = syn_le_table)) -> aov_synle
+
+aov_synle
+```
+
+```{r Syngnathus leptorhynchus depth}
+
+syn_le_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> syn_le_depth
+syn_le_depth
+```
+
+*Platyrhinoidis triseriata*
+
+```{r Platyrhinoidis triseriata time}
+#Platyrhinoidis triseriata
+
+GoodPlaTr = "Chordata;Chondrichthyes;;Platyrhinidae;Platyrhinoidis;Platyrhinoidis triseriata"
+Pla_Tr <- prune_taxa(GoodPlaTr, physeq_obj)
+taxa_names(Pla_Tr)
+
+vegan_otu(Pla_Tr) -> pla_tr_table
+
+pla_tr_table <- as.data.frame(pla_tr_table)
+
+pla_tr_table %>%
+  rename(Species = colnames(pla_tr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> pla_tr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = pla_tr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = pla_tr_table)) -> aov_platr
+
+aov_platr
+```
+
+```{r Platyrhinoidis triseriata depth}
+
+pla_tr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> pla_tr_depth
+pla_tr_depth
+```
+
+*Mustelus californicus*
+
+```{r Mustelus californicus time}
+#Mustelus californicus
+
+GoodMusCa = "Chordata;Chondrichthyes;Carcharhiniformes;Triakidae;Mustelus;Mustelus californicus"
+Mus_Ca <- prune_taxa(GoodMusCa, physeq_obj)
+taxa_names(Mus_Ca)
+
+vegan_otu(Mus_Ca) -> mus_ca_table
+
+mus_ca_table <- as.data.frame(mus_ca_table)
+
+mus_ca_table %>%
+  rename(Species = colnames(mus_ca_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> mus_ca_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = mus_ca_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = mus_ca_table)) -> aov_musca
+
+aov_musca
+```
+
+```{r Mustelus californicus depth}
+
+mus_ca_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> mus_ca_depth
+mus_ca_depth
+```
+
+*Triakis semifasciata*
+
+```{r Triakis semifasciata time}
+#Triakis semifasciata
+
+GoodTriSe = "Chordata;Chondrichthyes;Carcharhiniformes;Triakidae;Triakis;Triakis semifasciata"
+Tri_Se <- prune_taxa(GoodTriSe, physeq_obj)
+taxa_names(Tri_Se)
+
+vegan_otu(Tri_Se) -> tri_se_table
+
+tri_se_table <- as.data.frame(tri_se_table)
+
+tri_se_table %>%
+  rename(Species = colnames(tri_se_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> tri_se_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = tri_se_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = tri_se_table)) -> aov_trise
+
+aov_trise
+```
+
+```{r Triakis semifasciata depth}
+
+tri_se_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> tri_se_depth
+tri_se_depth
+```
+
+*Heterodontus francisci*
+
+```{r Heterodontus francisci time}
+#Heterodontus francisci
+
+GoodHetFr = "Chordata;Chondrichthyes;Heterodontiformes;Heterodontidae;Heterodontus;Heterodontus francisci"
+Het_Fr <- prune_taxa(GoodHetFr, physeq_obj)
+taxa_names(Het_Fr)
+
+vegan_otu(Het_Fr) -> het_fr_table
+
+het_fr_table <- as.data.frame(het_fr_table)
+
+het_fr_table %>%
+  rename(Species = colnames(het_fr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> het_fr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = het_fr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = het_fr_table)) -> aov_hetfr
+
+aov_hetfr
+```
+
+```{r Heterodontus francisci depth}
+
+het_fr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> het_fr_depth
+het_fr_depth
+```
+
+*Gymnura marmorata*
+
+```{r Gymnura marmorata time}
+#Gymnura marmorata
+
+GoodGymMa = "Chordata;Chondrichthyes;Myliobatiformes;Gymnuridae;Gymnura;Gymnura marmorata"
+Gym_Ma <- prune_taxa(GoodGymMa, physeq_obj)
+taxa_names(Gym_Ma)
+
+vegan_otu(Gym_Ma) -> gym_ma_table
+
+gym_ma_table <- as.data.frame(gym_ma_table)
+
+gym_ma_table %>%
+  rename(Species = colnames(gym_ma_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> gym_ma_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = gym_ma_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = gym_ma_table)) -> aov_gymma
+
+aov_gymma
+```
+
+```{r Gymnura marmorata depth}
+
+gym_ma_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> gym_ma_depth
+gym_ma_depth
+```
+
+*Pseudobatos productus*
+
+```{r Pseudobatos productus time}
+#Pseudobatos productus
+
+GoodPsePr = "Chordata;Chondrichthyes;Pristiformes/Rhiniformes group;Rhinobatidae;Pseudobatos;Pseudobatos productus"
+Pse_Pr <- prune_taxa(GoodPsePr, physeq_obj)
+taxa_names(Pse_Pr)
+
+vegan_otu(Pse_Pr) -> pse_pr_table
+
+pse_pr_table <- as.data.frame(pse_pr_table)
+
+pse_pr_table %>%
+  rename(Species = colnames(pse_pr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> pse_pr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = pse_pr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = pse_pr_table)) -> aov_psepr
+
+aov_psepr
+```
+
+```{r Pseudobatos productus depth}
+
+pse_pr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> pse_pr_depth
+pse_pr_depth
+```
+
+*Tursiops truncatus*
+
+```{r Tursiops truncatus time}
+#Tursiops truncatus
+
+GoodTurTr = "Chordata;Mammalia;Artiodactyla;Delphinidae;Tursiops;Tursiops truncatus"
+Tur_Tr <- prune_taxa(GoodTurTr, physeq_obj)
+taxa_names(Tur_Tr)
+
+vegan_otu(Tur_Tr) -> tur_tr_table
+
+tur_tr_table <- as.data.frame(tur_tr_table)
+
+tur_tr_table %>%
+  rename(Species = colnames(tur_tr_table)) %>% 
+  rownames_to_column("Sample_Name") %>% 
+  separate(Sample_Name, into = c("Day", "Station", "Replicate", "miu_elas", sep = "\\_"), remove = F) %>%
+  select(-Replicate, -miu_elas) -> tur_tr_table
+
+
+qqPlot(lm(sqrt(Species) ~ Day + Station + Day:Station, data = tur_tr_table))
+
+anova(lm(Species ~ Day + Station + Day:Station, data = tur_tr_table)) -> aov_turtr
+
+aov_turtr
+```
+
+```{r Tursiops truncatus depth}
+
+tur_tr_table %>%
+  group_by(Station) %>% 
+  summarise(mean = mean(Species), 
+            sd = sd(Species),
+            n = length(Species), 
+            se = sd/sqrt(n)) -> tur_tr_depth
+tur_tr_depth
+```
+
+
+Alphadiversity Analyses 
+
+We will now run species richness analyses using eDNA read counts. First, we will create a new phyloseq object with eDNA read counts.
+
+```{r Read in read count data}
+ASV.table.counts <- read_csv(file = "/Users/keiramonuki/Documents/Barber_Lab/decontam/ASV_post_occ_sum_taxonomy_pres_abs_separate.csv")
+```
+
+```{r Create Phyloseq Object}
+
+#Convert the data into a phyloseq object
+physeq_obj.counts <- convert_anacapa_to_phyloseq(ASV.table.counts, metadata)
+
+#Remove unassigned taxa and known contaminants (land mammals)
+badTaxa = c("Unassigned", "Chordata;Actinopteri;;;;","Chordata;Mammalia;Primates;Hominidae;Homo;Homo sapiens", "Chordata;Mammalia;;Bovidae;Bos;Bos taurus", "Chordata;Actinopteri;Cypriniformes;Cyprinidae;Ctenopharyngodon;Ctenopharyngodon idella", "Chordata;Aves;Galliformes;Phasianidae;Meleagris;Meleagris gallopavo", "Chordata;Mammalia;Primates;Hominidae;Pan;Pan paniscus", "Chordata;Mammalia;NA;Bovidae;Bison;Bison bonasus", "Chordata;Mammalia;NA;Suidae;Sus;Sus salvanius", "Chordata;Mammalia;Primates;Hominidae;Gorilla;Gorilla gorilla", "Chordata;Mammalia;Carnivora;Canidae;Canis;Canis lupus", "Chordata;Mammalia;Artiodactyla;Bovidae;Bison;Bison bison", "Chordata;Mammalia;Artiodactyla;Suidae;Sus;Sus scrofa", "Chordata;Aves;Galliformes;Phasianidae;Gallus;Gallus gallus", "Chordata;Mammalia;Primates;Cercopithecidae;Macaca;Macaca fascicularis")  
+goodTaxa <- setdiff(taxa_names(physeq_obj.counts), badTaxa)
+physeq_obj.counts <- prune_taxa(goodTaxa, physeq_obj.counts)
+
+physeq_obj.counts
+
+```
+
+```{r Remove Non-Native Species}
+
+#Remove known non-native taxa
+badTaxa.nonnative = c("Chordata;Actinopteri;;Pomacentridae;Stegastes;Stegastes nigricans", "Chordata;Actinopteri;Perciformes;Serranidae;Epinephelus;Epinephelus merra") 
+#
+goodTaxa.nonnative <- setdiff(taxa_names(physeq_obj.counts), badTaxa.nonnative)
+physeq_obj.counts <- prune_taxa(goodTaxa.nonnative, physeq_obj.counts)
+
+```
+
+Now we will run an ANOVA and Post hoc Tukey test to assess species richness across depths (excluding the shore station).
+
+```{r, ANOVA Observed Taxa Between Depths}
+
+#ANOVA between depths
+alpha.diversity <- estimate_richness(physeq_obj.counts, measures = c("Observed"))
+data <- cbind(sample_data(physeq_obj.counts), alpha.diversity)
+
+
+data %>% 
+  filter(Location != "SHR") -> data_noshore
+
+#Summary table of species across depths
+data_noshore %>% 
+  group_by(Location) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+
+model=lm(data_noshore$Observed ~ data_noshore$Location)
+ANOVA=aov(model)
+summary(ANOVA)
+
+```
+
+Species richness differed significantly across depth (p=0.00003). We will now run post-hoc Tukey tests.
+
+```{r Tukey HSD}
+
+#Tukey HSD test
+data_noshore$Location <- as.factor(data_noshore$Location) #ensure that Depths are factors
+TUKEY <- TukeyHSD(x=ANOVA, 'data_noshore$Location', conf.level=0.95)
+TUKEY
+
+```
+
+The 0-10, 0-9, 1-10, and 1-9 stations all differed from each other. We will visualize this relationship on a boxplot. 
+
+```{r Observed Taxa Box Plot}
+
+#Observed Taxa Box Plot Across Depth
+#Function for determining signficant Groups from Tukey
+generate_label_df <- function(TUKEY, variable){
+  
+  # Extract labels and factor levels from Tukey post-hoc 
+  Tukey.levels <- TUKEY[[variable]][,4]
+  Tukey.labels <- data.frame(multcompLetters(Tukey.levels)['Letters'])
+  
+  #I need to put the labels in the same order as in the boxplot :
+  Tukey.labels$treatment=rownames(Tukey.labels)
+  Tukey.labels=Tukey.labels[order(Tukey.labels$treatment) , ]
+  return(Tukey.labels)
+}
+
+#Determine Groups of Samples
+labels<-generate_label_df(TUKEY, "data_noshore$Location") #generate labels of groups using function
+names(labels)<-c('Letters','Location') #rename columns for merging
+
+#Obtain letter position for y axis using means
+yvalue<-aggregate(Observed~Location, data=data_noshore, mean) 
+
+final<-merge(labels,yvalue) #merge dataframes
+
+#Color palette to identify boxplot depth groups (shore, shallow, mid, deep)
+col.groups <- c(col3.gr[3], col3.gr[3], col3.gr[2], col8.gr[1], col8.gr[1])
+
+#Plot Boxplot of Observed Species w/ Signficant Groups labeled
+
+t_all <- ggplot(data_noshore, aes(x = Location, y = Observed)) + 
+  geom_boxplot(fill = col.groups) +
+  geom_jitter(width = 0) + 
+  theme_bw() + theme_ranacapa() +theme(legend.position="none", axis.title = element_text(size = 20), axis.text = element_text(size = 15)) + 
+  geom_text(data = final, aes(x = Location, y = Observed, label = Letters), vjust=-20,hjust=1.25)+
+  scale_y_continuous(name = "Observed Species", limits = c(15, 60)) +
+  xlab("Depth Station")
+                 
+#Reoder boxplot in order of decreasing depth
+neworder = c("0m", "1m", "5m", "9m", "10m")
+t_all$data$Location <- factor(t_all$data$Location, levels=neworder)
+t_all
+
+```
+
+We will now compare species richness between nearshore and surf zone habitats using the eDNA read counts from the shore and 1m station.
+
+```{r Mean Species Richness in shore station}
+shr_vs_1m %>% 
+  filter(Location == "SHR") %>% 
+  select(Observed) %>% 
+  summary()
+```
+
+The shore station had a mean of 44.1 species. 
+
+```{r Nearshore vs. Surf Zone t-test}
+
+data %>% 
+  filter(Location == "SHR" | Location == "1m") -> shr_vs_1m
+
+t.test(Observed ~ Location, data = shr_vs_1m)
+
+
+```
+
+There are significantly more species in the shore station than the 1m station (p=0.0172). 
+
+We will also look at species richness across sampling days.
+
+```{r, Observed Taxa Across Days}
+
+#ANOVA between depths
+alpha.diversity <- estimate_richness(physeq_obj.counts, measures = c("Observed"))
+data <- cbind(sample_data(physeq_obj.counts), alpha.diversity)
+
+#Summary table of species
+data %>% 
+  group_by(Collected_Date) %>% 
+  summarise(mean = mean(Observed), sum = sum(Observed))
+
+summary(aov(lm(data$Observed ~ data$Collected_Date)))
+
+```
+
+There was no difference in species richness across days. <br />
+
+To assess the importance of settlement processes on eDNA, we wanted to see if pelagic species were present in the deep station samples.
+
+```{r Species in Deep Stations}
+
+species_9m <- physeq_obj.counts %>% subset_samples(Location == "9m")
+species_10m <- physeq_obj.counts %>% subset_samples(Location == "10m")
+
+
+species_9m <- prune_taxa(
+  taxa = apply(otu_table(species_9m), 1, function(x){sum(x>0) >= 1}), 
+  x = species_9m)
+
+species_10m <- prune_taxa(
+  taxa = apply(otu_table(species_10m), 1, function(x){sum(x>0) >= 1}), 
+  x = species_10m)
+
+
+species_9m <- taxa_names(species_9m)
+species_10m <- taxa_names(species_10m)
+
+species_9m_df <- as.data.frame(species_9m)
+species_10m_df <- as.data.frame(species_10m)
+
+
+names(species_9m_df) <- "Species"
+names(species_10m_df) <- "Species"
+
+species_9m_df
+
+species_10m_df
+
+```
+There were some pelagic species present at depth. However, the relative abundances of these pelagic species show higher abundances in the surface stations. 
+
+
