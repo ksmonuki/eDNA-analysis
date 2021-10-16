@@ -68,6 +68,7 @@ Here are the main dependencies required. The additional R packages not listed be
 
 #### If you have any questions, please reach out to Keira Monuki at ksmonuki@ucdavis.edu
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5574141.svg)](https://doi.org/10.5281/zenodo.5574141)
 
 
 
